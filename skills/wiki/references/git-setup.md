@@ -64,3 +64,18 @@ user authorization.
 
 Avoid automatic-commit plugins during agent operations because they can capture
 partial or unrelated state and invalidate exact-operation history.
+
+## Binary assets and Git LFS
+
+User vaults often contain large, non-textual assets such as purchased ebooks,
+papers, and media that cannot be re-downloaded from a public URL. To prevent Git
+repository bloat while ensuring full cross-device synchronization:
+
+1. Store permanent binaries under `assets/` (e.g., `assets/books/`, `assets/papers/`).
+2. Track `assets/` with Git LFS in `.gitattributes`:
+   ```gitattributes
+   /assets/** filter=lfs diff=lfs merge=lfs -text
+   ```
+3. Keep `.raw/` as an untracked or local-only capture cache for web scrapes,
+   while `assets/` remains fully synced across machines.
+

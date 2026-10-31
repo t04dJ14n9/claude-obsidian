@@ -25,7 +25,11 @@ Do not overload one ledger with all three jobs.
 ## Source rules
 
 - Use SHA-256 for new source identity and delta checks.
-- File locators are vault-relative. Remote locators are absolute HTTPS URLs.
+- File locators are vault-relative (typically pointing into `assets/` for permanent
+  local binaries, or `.raw/` for local captures). Active file sources must exist
+  and match `content_sha256` during lint checks.
+- Remote locators are absolute HTTPS URLs. Web captures may retain an immutable
+  copy under `.raw/captured/`, but the source origin remains the canonical HTTPS URL.
 - Source authority is one of `official`, `primary`, `secondary`, `community`,
   `synthetic`, or `unknown`.
 - Review state is `unreviewed`, `active`, `superseded`, or `rejected`.

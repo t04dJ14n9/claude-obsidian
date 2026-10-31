@@ -63,6 +63,17 @@ External source payloads added under `.raw/` must use transaction mode `create`.
 Never replace or edit an existing raw payload. A changed remote source receives a
 new immutable capture or an honest ledger update, not an overwrite.
 
+### Source storage and binary placement
+
+- **Web captures:** Staged via `inbox/` into `.raw/captured/` as immutable
+  content-addressed cache; provenance locator remains the canonical remote HTTPS URL.
+- **Permanent local binaries (purchased ebooks, private PDFs, figures):** Store
+  in `assets/` (e.g. `assets/books/`, `assets/papers/`). Do not force them into
+  `.raw/` where Obsidian hides them from the file explorer. Record provenance as
+  `origin: { kind: "file", locator: "assets/..." }`. This keeps them readable
+  in Obsidian, auditable by `wiki-lint`, and synchronizable across machines via
+  Git LFS.
+
 ## Analyze before drafting
 
 1. Compute SHA-256 for each available payload and check
