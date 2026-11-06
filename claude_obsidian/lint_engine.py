@@ -112,8 +112,8 @@ _ATX_HEADING_RE = re.compile(
 )
 _ATX_CLOSING_RE = re.compile(r"(?<![ \t])[ \t]+#+[ \t]*$")
 _HEADING_BLOCK_ID_RE = re.compile(r"(?<![ \t])[ \t]+\^[A-Za-z0-9][A-Za-z0-9_-]*[ \t]*$")
-# Obsidian strips these from heading link text; compare both sides that way.
-_HEADING_LINK_STRIPPED_RE = re.compile(r"%%|[:|^#\[\]]")
+# Obsidian ignores these when matching a heading link; compare both sides that way.
+_HEADING_LINK_STRIPPED_RE = re.compile(r"[!\"#$%&()*+,.:;<=>?@^`{|}~/\[\]\\]")
 _SETEXT_UNDERLINE_RE = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
 _THEMATIC_BREAK_RE = re.compile(r"^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$")
 # One container marker: a blockquote or list item, with one following space.
@@ -1114,16 +1114,6 @@ def _is_allowlisted(link: _Link, patterns: Sequence[str]) -> bool:
     return False
 
 
-def _uses_markdown_links(root: Path) -> bool:
-    """Whether Obsidian's "Use [[Wikilinks]]" setting is off for this vault."""
-    try:
-        raw = _transaction_reader()(root, ".obsidian/app.json", limit=1024 * 1024)
-        settings = None if raw is None else strict_json_loads(raw.decode("utf-8"))
-    except Exception:
-        return False  # Obsidian's own settings are not lint findings.
-    return isinstance(settings, dict) and settings.get("useMarkdownLinks") is True
-
-
 def _frontmatter_policy(
     root: Path, requested: str | None
 ) -> tuple[str, list[dict[str, str]]]:
@@ -1333,7 +1323,7 @@ def _heading_path_exists(fragment: str, page: _Page) -> bool:
     return False
 
 
-def _fragment_error(link: _Link, target: _Target, *, github_slugs: bool = False) -> str | None:
+def _fragment_error(link: _Link, target: _Target) -> str | None:
     if link.fragment is None:
         return None
     if target.page is None:
@@ -1353,9 +1343,9 @@ def _fragment_error(link: _Link, target: _Target, *, github_slugs: bool = False)
         if link.fragment.casefold() not in target.page.block_ids:
             return "block-not-found"
         return None
-    # In a Markdown-links vault, links may also use GitHub slugs; Obsidian
-    # then opens the note but does not jump to the heading.
-    github_slug = (github_slugs and link.syntax == "markdown-link"
+    # Markdown links may also use GitHub slugs; Obsidian then opens the note
+    # but does not jump to the heading.
+    github_slug = (link.syntax == "markdown-link"
                    and link.fragment.replace("_", "") in target.page.heading_slugs)
     if not github_slug and not _heading_path_exists(link.fragment, target.page):
         return "heading-not-found"
@@ -1630,7 +1620,6 @@ def lint_vault(
         raise ValueError("as_of must be an ISO date, date object, or null")
     patterns, config_exclude_patterns, configuration_errors = _load_allowlist(vault_root)
     selected_policy, policy_errors = _frontmatter_policy(vault_root, frontmatter_policy)
-    github_slugs = _uses_markdown_links(vault_root)
     configuration_errors.extend(policy_errors)
 
     all_paths = _walk_files(root_path)
@@ -1827,7 +1816,7 @@ def lint_vault(
             candidate = candidates[0]
             if candidate.path in incoming and candidate.path != link.source:
                 incoming[candidate.path].add(link.source)
-            fragment_reason = _fragment_error(link, candidate, github_slugs=github_slugs)
+            fragment_reason = _fragment_error(link, candidate)
             if fragment_reason is None:
                 if link.fragment is not None and PurePosixPath(candidate.path).suffix.casefold() == ".pdf":
                     pdf_fragments_syntax_checked += 1

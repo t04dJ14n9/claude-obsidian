@@ -1544,7 +1544,6 @@ class ObsidianConformanceTests(unittest.TestCase):
 
     def test_markdown_links_accept_github_heading_slugs(self) -> None:
         report = self._lint({
-            ".obsidian/app.json": '{"useMarkdownLinks": true}',
             "wiki/heads.md": self.FRONT + (
                 "# Use Postgres for storage\n\nx\n\n## Step 1: *Install* `pg`\n\ny\n\n"
                 "## Notes\n\na\n\n## Notes\n\nb\n\n## snake_case name\n\nc\n"
@@ -1567,21 +1566,20 @@ class ObsidianConformanceTests(unittest.TestCase):
             sorted((entry["target"], entry["reason"]) for entry in report["dead_links"]),
         )
 
-    def test_github_heading_slugs_need_markdown_links_setting(self) -> None:
-        pages = {
-            "wiki/heads.md": self.FRONT + "# Use Postgres\n\nx\n",
-            "wiki/user.md": self.FRONT + "[a](heads.md#use-postgres) [b](heads.md#Use%20Postgres)\n",
-        }
-        for settings in (None, '{"useMarkdownLinks": false}', "{not json"):
-            with self.subTest(settings=settings):
-                files = dict(pages)
-                if settings is not None:
-                    files[".obsidian/app.json"] = settings
-                report = self._lint(files)
-                self.assertEqual(
-                    [("heads.md#use-postgres", "heading-not-found")],
-                    [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
-                )
+    def test_heading_links_ignore_punctuation_obsidian_ignores(self) -> None:
+        report = self._lint({
+            "wiki/heads.md": self.FRONT + (
+                "# Step 1. Install (pg)\n\nx\n\n## What's new?\n\ny\n\n## a/b & c\n\nz\n"
+            ),
+            "wiki/user.md": self.FRONT + (
+                "[[heads#Step 1 Install pg]] [[heads#What's new]] [[heads#a b c]]\n"
+                "[x](heads.md#Step%201%20Install%20pg) [[heads#Whats new]]\n"
+            ),
+        })
+        self.assertEqual(
+            [("heads#Whats new", "heading-not-found")],
+            [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
+        )
 
     def test_wikilink_targets_are_literal_but_markdown_destinations_decode(self) -> None:
         report = self._lint({
