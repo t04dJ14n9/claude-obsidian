@@ -2528,5 +2528,127 @@ class GitignoreDisambiguationTests(unittest.TestCase):
         self.assertEqual([], report["stale_index_entries"])
 
 
+class PrettierCheckTests(unittest.TestCase):
+    """The opt-in Prettier check, run against a fake npx so no network is used."""
+
+    FRONT = (
+        "---\ntitle: Fixture\ntype: concept\nstatus: developing\n"
+        "created: 2026-10-17\nupdated: 2026-10-17\ntags: []\n---\n"
+    )
+    FAKE_NPX = (
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$PWD" "$@" > "$FAKE_NPX_LOG"\n'
+        'printf "%b" "$FAKE_NPX_STDOUT"\n'
+        'printf "%b" "$FAKE_NPX_STDERR" >&2\n'
+        'exit "${FAKE_NPX_EXIT:-0}"\n'
+    )
+
+    def _lint(self, files, *, stdout="", stderr="", exit_code=0, npx=True, lint_root="",
+              **options):
+        """Lint a temporary vault; return the report and fake npx's argv (or None if not run)."""
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "vault"
+            for relative, text in files.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            fake = base / "npx"
+            fake.write_text(self.FAKE_NPX, encoding="utf-8")
+            fake.chmod(0o755)
+            log = base / "npx.log"
+            env = {"FAKE_NPX_LOG": str(log), "FAKE_NPX_STDOUT": stdout,
+                   "FAKE_NPX_STDERR": stderr, "FAKE_NPX_EXIT": str(exit_code)}
+            before = _snapshot(root)
+            with mock.patch.dict(os.environ, env), mock.patch.object(
+                lint_engine.shutil, "which", return_value=str(fake) if npx else None
+            ):
+                report = lint_engine.lint_vault(root / lint_root, as_of="2026-10-17", **options)
+            self.assertEqual(before, _snapshot(root))
+            calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else None
+            return report, calls, root
+
+    def _vault(self, **extra):
+        files = {
+            ".prettierrc.json": "{}\n",
+            "wiki/index.md": self.FRONT + "[a](a.md) [b](notes/b.md)\n",
+            "wiki/a.md": self.FRONT + "[index](index.md)\n",
+            "wiki/notes/b.md": self.FRONT + "[index](../index.md)\n",
+        }
+        files.update(extra)
+        return files
+
+    def test_off_by_default_so_checkpoint_lint_stays_offline(self) -> None:
+        report, calls, _ = self._lint(self._vault(), stdout="wiki/a.md\n", exit_code=1)
+        self.assertIsNone(calls)
+        self.assertEqual("skipped", report["summary"]["prettier"])
+        self.assertEqual([], report["prettier_unformatted"])
+
+    def test_vault_without_prettier_config_is_not_checked(self) -> None:
+        files = self._vault()
+        del files[".prettierrc.json"]
+        report, calls, _ = self._lint(files, stdout="wiki/a.md\n", exit_code=1, prettier=True)
+        self.assertIsNone(calls)
+        self.assertEqual("no-config", report["summary"]["prettier"])
+
+    def test_package_json_prettier_key_opts_in(self) -> None:
+        files = self._vault()
+        del files[".prettierrc.json"]
+        files["package.json"] = '{"prettier": {"proseWrap": "preserve"}}\n'
+        report, calls, _ = self._lint(files, prettier=True)
+        self.assertIsNotNone(calls)
+        self.assertEqual("checked", report["summary"]["prettier"])
+
+    def test_lists_unformatted_pages_from_the_vault_root(self) -> None:
+        report, calls, root = self._lint(
+            self._vault(), stdout="wiki/notes/b.md\nwiki/a.md\n", exit_code=1, prettier=True
+        )
+        self.assertEqual(str(root.resolve()), calls[0])
+        self.assertEqual(["--yes", "prettier@latest", "--list-different",
+                          "--no-error-on-unmatched-pattern", "wiki/**/*.md"], calls[1:])
+        self.assertEqual([{"path": "wiki/a.md"}, {"path": "wiki/notes/b.md"}],
+                         report["prettier_unformatted"])
+        self.assertEqual("checked", report["summary"]["prettier"])
+        self.assertEqual(2, report["summary"]["category_counts"]["prettier_unformatted"])
+        self.assertEqual(2, report["summary"]["issues_found"])
+        self.assertIn("## Prettier Formatting", lint_engine.render_markdown(report))
+
+    def test_formatted_vault_reports_nothing(self) -> None:
+        report, calls, _ = self._lint(self._vault(), prettier=True)
+        self.assertIsNotNone(calls)
+        self.assertEqual([], report["prettier_unformatted"])
+        self.assertEqual(0, report["summary"]["issues_found"])
+
+    def test_excluded_and_hidden_paths_are_dropped(self) -> None:
+        report, _, _ = self._lint(
+            self._vault(), stdout="wiki/a.md\nwiki/.drafts/x.md\nwiki/notes/b.md\n",
+            exit_code=1, prettier=True, exclude=["wiki/notes/*"],
+        )
+        self.assertEqual([{"path": "wiki/a.md"}], report["prettier_unformatted"])
+
+    def test_prettier_error_is_a_configuration_error(self) -> None:
+        report, _, _ = self._lint(self._vault(), stderr="npm error network\n", exit_code=2,
+                                  prettier=True)
+        self.assertEqual("failed", report["summary"]["prettier"])
+        self.assertEqual([], report["prettier_unformatted"])
+        errors = [e for e in report["configuration_errors"] if e["reason"] == "prettier-failed"]
+        self.assertEqual(1, len(errors))
+        self.assertIn("npm error network", errors[0]["message"])
+
+    def test_missing_npx_is_reported_not_raised(self) -> None:
+        report, calls, _ = self._lint(self._vault(), npx=False, prettier=True)
+        self.assertIsNone(calls)
+        self.assertEqual("failed", report["summary"]["prettier"])
+        self.assertEqual(["prettier-unavailable"],
+                         [e["reason"] for e in report["configuration_errors"]])
+
+    def test_wiki_root_lint_reports_paths_relative_to_wiki(self) -> None:
+        files = self._vault(**{".claude-obsidian.json": "{}\n"})
+        report, calls, root = self._lint(files, stdout="wiki/a.md\n", exit_code=1,
+                                         prettier=True, lint_root="wiki")
+        self.assertEqual(str(root.resolve()), calls[0])
+        self.assertEqual("wiki/**/*.md", calls[-1])
+        self.assertEqual([{"path": "a.md"}], report["prettier_unformatted"])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
