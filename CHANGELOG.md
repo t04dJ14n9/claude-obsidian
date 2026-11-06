@@ -15,6 +15,11 @@ implementation record for older releases.
   so they open on GitHub and in VS Code as well as in Obsidian. Other vaults keep
   wikilinks, and properties keep wikilinks in both. See
   `skills/wiki/references/link-style.md`.
+- Prettier formatting: in a vault with a Prettier config, save, ingest, and fold
+  format the Markdown pages they write with `npx prettier@latest` before the
+  transaction, and lint adds a `prettier --check` of `wiki/**/*.md`, reported
+  apart from the engine's findings. `.raw/` is never formatted. Vaults without a
+  Prettier config are unchanged. See `skills/wiki/references/formatting.md`.
 
 ### Changed
 

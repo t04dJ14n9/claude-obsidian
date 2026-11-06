@@ -50,6 +50,7 @@ selected vault's `wiki/` directory.
    `source` for material summary, or `session` for approved conversation
    content. Use declarative prose, internal links in
    [the vault's link style](../wiki/references/link-style.md), and honest frontmatter.
+   When the vault has a Prettier config, [format the draft](../wiki/references/formatting.md).
 
 If the material has no durable value or is already represented, report that and
 offer a no-op. Honor the user's choice if they still want it saved.

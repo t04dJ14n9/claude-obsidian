@@ -89,7 +89,8 @@ new immutable capture or an honest ledger update, not an overwrite.
    code-spans for literal code, CLI flags, and exact identifiers, not for
    citable URLs. This guidance applies only to narrative prose; ledger and
    manifest locator fields keep the raw URL string. Link vault pages in
-   [the vault's link style](../wiki/references/link-style.md).
+   [the vault's link style](../wiki/references/link-style.md). When the vault has
+   a Prettier config, [format the drafts](../wiki/references/formatting.md).
 7. Reuse existing canonical pages and stable addresses. Request new addresses
    through `address_requests`; never call a counter allocator from a worker.
 
