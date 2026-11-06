@@ -1595,6 +1595,22 @@ class ObsidianConformanceTests(unittest.TestCase):
             [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
         )
 
+    def test_markdown_link_style_from_link_style_reference_is_clean(self) -> None:
+        report = self._lint({
+            ".obsidian/app.json": '{"useMarkdownLinks": true}',
+            "wiki/decisions/Storage.md": self.FRONT + "# Use Postgres\n\nx\n",
+            "wiki/sources/My Source.md": self.FRONT + "Quoted evidence. ^evidence-block\n",
+            "wiki/sources/paper.pdf": "%PDF-1.4\n",
+            "wiki/assets/diagram.png": "png",
+            "wiki/concepts/user.md": self.FRONT.replace("---\n", "---\nrelated: \"[[Storage]]\"\n", 1) + (
+                "[Storage](../decisions/Storage.md) "
+                "[Use Postgres](../decisions/Storage.md#use-postgres)\n"
+                "[evidence](../sources/My%20Source.md#^evidence-block) "
+                "![diagram](../assets/diagram.png) [p. 3](../sources/paper.pdf#page=3)\n"
+            ),
+        })
+        self.assertEqual([], report["dead_links"])
+
     def test_wikilink_targets_are_literal_but_markdown_destinations_decode(self) -> None:
         report = self._lint({
             "wiki/a%20b.md": self.FRONT + "Literal percent name.\n",

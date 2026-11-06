@@ -126,6 +126,8 @@ Read only the reference needed for the current request:
 - [rest-api.md](references/rest-api.md) only when the user explicitly has or
   requests the Local REST API adapter;
 - [dataview.md](references/dataview.md) for an existing optional Dataview setup;
+- [link-style.md](references/link-style.md) before writing links to vault
+  files: wikilinks, or Markdown links when Obsidian's `useMarkdownLinks` is on;
 - [knowledge-recipes.md](references/knowledge-recipes.md) for cited glossary or
   consolidation work;
 - [coordination.md](references/coordination.md) for external editors or multiple

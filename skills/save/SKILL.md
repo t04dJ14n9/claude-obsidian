@@ -48,7 +48,8 @@ selected vault's `wiki/` directory.
    (`claude_obsidian/page_schema.py`, documented in WIKI.md), usually
    `question` for an answered analysis, `concept` for an idea worth naming,
    `source` for material summary, or `session` for approved conversation
-   content. Use declarative prose, Obsidian wikilinks, and honest frontmatter.
+   content. Use declarative prose, internal links in
+   [the vault's link style](../wiki/references/link-style.md), and honest frontmatter.
 
 If the material has no durable value or is already represented, report that and
 offer a no-op. Honor the user's choice if they still want it saved.

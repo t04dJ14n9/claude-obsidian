@@ -42,7 +42,8 @@
       "intentional_divergences": [
         "Local mutations require one reviewed transaction; upstream syntax advice never overrides selected-vault or consent rules.",
         "Existing skill identities remain stable; no Knap dependency is added.",
-        "Date arithmetic remains unresolved until a native versioned observation."
+        "Date arithmetic remains unresolved until a native versioned observation.",
+        "Vault note links follow the vault's link style: wikilinks, or relative Markdown links when Obsidian's useMarkdownLinks is on."
       ]
     },
     {
@@ -422,7 +423,7 @@
     },
     {
       "path": "skills/obsidian-markdown/SKILL.md",
-      "sha256": "c7c04184ba81b1f8482e647a56899bfc9796daa20acbd68e78c57b406d4351bf"
+      "sha256": "66fa7b31eea36b7b4d17e808558eaaee0707192d1a01c30ecce2f4ac915eb19a"
     },
     {
       "path": "skills/wiki-mode/SKILL.md",

@@ -7,6 +7,15 @@ implementation record for older releases.
 
 ## [Unreleased]
 
+### Added
+
+- Markdown link style: when `.obsidian/app.json` sets `"useMarkdownLinks": true`,
+  ingest, save, fold, and query write vault links as relative Markdown links
+  with GitHub heading slugs (`[Use Postgres](../decisions/Storage.md#use-postgres)`),
+  so they open on GitHub and in VS Code as well as in Obsidian. Other vaults keep
+  wikilinks, and properties keep wikilinks in both. See
+  `skills/wiki/references/link-style.md`.
+
 ### Changed
 
 - Lint accepts GitHub heading slugs in Markdown links (`Note.md#use-postgres`),
