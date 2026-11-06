@@ -2528,5 +2528,137 @@ class GitignoreDisambiguationTests(unittest.TestCase):
         self.assertEqual([], report["stale_index_entries"])
 
 
+class MarkdownlintCheckTests(unittest.TestCase):
+    """The opt-in markdownlint check, run against a fake npx so no network is used."""
+
+    FRONT = (
+        "---\ntitle: Fixture\ntype: concept\nstatus: developing\n"
+        "created: 2026-10-17\nupdated: 2026-10-17\ntags: []\n---\n"
+    )
+    FAKE_NPX = (
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$PWD" "$@" > "$FAKE_NPX_LOG"\n'
+        'printf "%b" "$FAKE_NPX_STDERR" >&2\n'
+        'exit "${FAKE_NPX_EXIT:-0}"\n'
+    )
+    TWO_FINDINGS = (
+        "markdownlint-cli2 v0.24.0 (markdownlint v0.42.0)\n"
+        "wiki/notes/b.md:3:5 error MD034/no-bare-urls Bare URL used [Context: \"https://x\"]\n"
+        "wiki/a.md:7 error MD040/fenced-code-language Fenced code blocks should have a language specified\n"
+    )
+
+    def _lint(self, files, *, stderr="", exit_code=0, npx=True, lint_root="", **options):
+        """Lint a temporary vault; return the report, fake npx's argv (None if not run), and the root."""
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "vault"
+            for relative, text in files.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            fake = base / "npx"
+            fake.write_text(self.FAKE_NPX, encoding="utf-8")
+            fake.chmod(0o755)
+            log = base / "npx.log"
+            env = {"FAKE_NPX_LOG": str(log), "FAKE_NPX_STDERR": stderr, "FAKE_NPX_EXIT": str(exit_code)}
+            before = _snapshot(root)
+            with mock.patch.dict(os.environ, env), mock.patch.object(
+                lint_engine.shutil, "which", return_value=str(fake) if npx else None
+            ):
+                report = lint_engine.lint_vault(root / lint_root, as_of="2026-10-17", **options)
+            self.assertEqual(before, _snapshot(root))
+            calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else None
+            return report, calls, root
+
+    def _vault(self, **extra):
+        files = {
+            ".markdownlint-cli2.jsonc": '{"config": {"default": true}}\n',
+            "wiki/index.md": self.FRONT + "[a](a.md) [b](notes/b.md)\n",
+            "wiki/a.md": self.FRONT + "[index](index.md)\n",
+            "wiki/notes/b.md": self.FRONT + "[index](../index.md)\n",
+        }
+        files.update(extra)
+        return files
+
+    def test_off_by_default_so_checkpoint_lint_stays_offline(self) -> None:
+        report, calls, _ = self._lint(self._vault(), stderr=self.TWO_FINDINGS, exit_code=1)
+        self.assertIsNone(calls)
+        self.assertEqual("skipped", report["summary"]["markdownlint"])
+        self.assertEqual([], report["markdownlint_findings"])
+
+    def test_vault_without_markdownlint_config_is_not_checked(self) -> None:
+        files = self._vault()
+        del files[".markdownlint-cli2.jsonc"]
+        report, calls, _ = self._lint(files, stderr=self.TWO_FINDINGS, exit_code=1, markdownlint=True)
+        self.assertIsNone(calls)
+        self.assertEqual("no-config", report["summary"]["markdownlint"])
+
+    def test_other_config_names_opt_in(self) -> None:
+        for name, text in ((".markdownlint.yaml", "default: true\n"),
+                           ("package.json", '{"markdownlint-cli2": {"config": {}}}\n')):
+            files = self._vault()
+            del files[".markdownlint-cli2.jsonc"]
+            files[name] = text
+            report, calls, _ = self._lint(files, markdownlint=True)
+            self.assertIsNotNone(calls, name)
+            self.assertEqual("checked", report["summary"]["markdownlint"], name)
+
+    def test_reports_findings_from_the_vault_root(self) -> None:
+        report, calls, root = self._lint(
+            self._vault(), stderr=self.TWO_FINDINGS, exit_code=1, markdownlint=True
+        )
+        self.assertEqual(str(root.resolve()), calls[0])
+        self.assertEqual(["--yes", "markdownlint-cli2@latest", "--no-globs", "wiki/**/*.md"], calls[1:])
+        self.assertEqual(
+            [
+                {"path": "wiki/a.md", "line": 7, "rule": "MD040", "severity": "error",
+                 "message": "Fenced code blocks should have a language specified"},
+                {"path": "wiki/notes/b.md", "line": 3, "rule": "MD034", "severity": "error",
+                 "message": 'Bare URL used [Context: "https://x"]', "column": 5},
+            ],
+            report["markdownlint_findings"],
+        )
+        self.assertEqual("checked", report["summary"]["markdownlint"])
+        self.assertEqual(2, report["summary"]["category_counts"]["markdownlint_findings"])
+        self.assertEqual(2, report["summary"]["issues_found"])
+        self.assertIn("## Markdownlint Findings", lint_engine.render_markdown(report))
+
+    def test_clean_vault_reports_nothing(self) -> None:
+        report, calls, _ = self._lint(self._vault(), stderr="Summary: 0 error(s)\n", markdownlint=True)
+        self.assertIsNotNone(calls)
+        self.assertEqual([], report["markdownlint_findings"])
+        self.assertEqual(0, report["summary"]["issues_found"])
+
+    def test_excluded_and_hidden_paths_are_dropped(self) -> None:
+        stderr = self.TWO_FINDINGS + "wiki/.drafts/x.md:1 error MD041/first-line-h1 First line\n"
+        report, _, _ = self._lint(self._vault(), stderr=stderr, exit_code=1, markdownlint=True,
+                                  exclude=["wiki/notes/*"])
+        self.assertEqual(["wiki/a.md"], [e["path"] for e in report["markdownlint_findings"]])
+
+    def test_markdownlint_error_is_a_configuration_error(self) -> None:
+        report, _, _ = self._lint(self._vault(), stderr="Error: bad config\n", exit_code=2,
+                                  markdownlint=True)
+        self.assertEqual("failed", report["summary"]["markdownlint"])
+        self.assertEqual([], report["markdownlint_findings"])
+        errors = [e for e in report["configuration_errors"] if e["reason"] == "markdownlint-failed"]
+        self.assertEqual(1, len(errors))
+        self.assertIn("bad config", errors[0]["message"])
+
+    def test_missing_npx_is_reported_not_raised(self) -> None:
+        report, calls, _ = self._lint(self._vault(), npx=False, markdownlint=True)
+        self.assertIsNone(calls)
+        self.assertEqual("failed", report["summary"]["markdownlint"])
+        self.assertEqual(["markdownlint-unavailable"],
+                         [e["reason"] for e in report["configuration_errors"]])
+
+    def test_wiki_root_lint_reports_paths_relative_to_wiki(self) -> None:
+        files = self._vault(**{".claude-obsidian.json": "{}\n"})
+        report, calls, root = self._lint(files, stderr=self.TWO_FINDINGS, exit_code=1,
+                                         markdownlint=True, lint_root="wiki")
+        self.assertEqual(str(root.resolve()), calls[0])
+        self.assertEqual("wiki/**/*.md", calls[-1])
+        self.assertEqual(["a.md", "notes/b.md"], [e["path"] for e in report["markdownlint_findings"]])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
