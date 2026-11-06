@@ -15,13 +15,6 @@ implementation record for older releases.
   so they open on GitHub and in VS Code as well as in Obsidian. Other vaults keep
   wikilinks, and properties keep wikilinks in both. See
   `skills/wiki/references/link-style.md`.
-- Prettier check: `claude-obsidian lint` runs
-  `npx prettier@latest --list-different "wiki/**/*.md"` from the vault root when
-  the vault has a Prettier config (`.prettierrc*`, `prettier.config.*`, or a
-  `prettier` key in `package.json`), and reports the files it lists as
-  `prettier_unformatted`, which `--strict` counts. A missing `npx` or a failed
-  run is a configuration error. `--no-prettier` skips it; `lint_vault()` and
-  checkpoint lint keep it off, so they stay offline and deterministic.
 
 ### Changed
 

@@ -44,9 +44,7 @@ import json
 import os
 import posixpath
 import re
-import shutil
 import stat
-import subprocess
 import sys
 import urllib.parse
 import unicodedata
@@ -1565,90 +1563,12 @@ def _sanitize_report_value(value: Any) -> Any:
     return value
 
 
-# A vault opts into the Prettier check with one of these files at its root, or a
-# "prettier" key in package.json.
-_PRETTIER_CONFIG_FILES = (
-    ".prettierrc", ".prettierrc.json", ".prettierrc.json5", ".prettierrc.yaml",
-    ".prettierrc.yml", ".prettierrc.toml", ".prettierrc.js", ".prettierrc.cjs",
-    ".prettierrc.mjs", "prettier.config.js", "prettier.config.cjs", "prettier.config.mjs",
-)
-PRETTIER_TIMEOUT_SECONDS = 300
-
-
-def has_prettier_config(vault_root: str | os.PathLike[str]) -> bool:
-    """Return whether the vault root declares a Prettier configuration."""
-    root = Path(vault_root)
-    if any((root / name).is_file() for name in _PRETTIER_CONFIG_FILES):
-        return True
-    try:
-        package = json.loads((root / "package.json").read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError):
-        return False
-    return isinstance(package, dict) and "prettier" in package
-
-
-def _prettier_findings(
-    vault_root: Path,
-    root_path: Path,
-    page_prefix: str,
-    exclude_patterns: Sequence[str],
-) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    """List pages Prettier would reformat, and any error running it.
-
-    Runs ``npx prettier@latest --list-different`` from the vault root so the
-    vault's config and ``.prettierignore`` apply. Paths are reported relative
-    to the lint root, like every other finding.
-    """
-    npx = shutil.which("npx")
-    if npx is None:
-        return [], [{
-            "path": ".",
-            "reason": "prettier-unavailable",
-            "message": "the vault has a Prettier config, but npx is not on PATH; formatting was not checked",
-        }]
-    command = [npx, "--yes", "prettier@latest", "--list-different",
-               "--no-error-on-unmatched-pattern", f"{page_prefix}/**/*.md"]
-    try:
-        result = subprocess.run(
-            command, cwd=vault_root, stdin=subprocess.DEVNULL, capture_output=True,
-            text=True, encoding="utf-8", errors="replace",
-            timeout=PRETTIER_TIMEOUT_SECONDS, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return [], [{
-            "path": ".",
-            "reason": "prettier-failed",
-            "message": f"npx prettier@latest did not finish: {exc.__class__.__name__}",
-        }]
-    # --list-different exits 1 when it lists files; anything else is an error.
-    if result.returncode not in (0, 1):
-        detail = " ".join(result.stderr.split())[-300:]
-        return [], [{
-            "path": ".",
-            "reason": "prettier-failed",
-            "message": f"npx prettier@latest exited {result.returncode}: {detail}",
-        }]
-    offset = root_path.relative_to(vault_root).as_posix()
-    unformatted: list[dict[str, str]] = []
-    for line in result.stdout.splitlines():
-        canonical = line.strip().replace("\\", "/")
-        if not canonical.endswith(".md"):
-            continue
-        relative = canonical if offset == "." else canonical.removeprefix(f"{offset}/")
-        if not _is_excluded(relative, exclude_patterns) and all(
-            is_visible_path(part) for part in relative.split("/")
-        ):
-            unformatted.append({"path": relative})
-    return unformatted, []
-
-
 def lint_vault(
     root: str | os.PathLike[str],
     *,
     as_of: date | str | None = None,
     exclude: Sequence[str] | None = None,
     frontmatter_policy: str | None = None,
-    prettier: bool = False,
 ) -> dict[str, Any]:
     """Return a deterministic, JSON-serializable lint report.
 
@@ -1674,13 +1594,6 @@ def lint_vault(
     scalar, ISO date and tag-value checks. The default ``presence`` profile
     preserves existing adopted-vault vocabularies. Vault-side lint JSON may
     select the same profile with a ``frontmatter_policy`` property.
-
-    ``prettier=True`` also checks page formatting when the vault root has a
-    Prettier config: it runs ``npx prettier@latest --list-different`` on the
-    wiki's Markdown and reports the listed files as ``prettier_unformatted``.
-    That check may download Prettier from npm and depends on the release npm
-    serves, so it is off by default and the rest of the report stays
-    deterministic.
     """
 
     root_path = Path(root).expanduser()
@@ -2001,20 +1914,6 @@ def lint_vault(
     invalid_frontmatter.sort(key=_entry_sort_key)
     unsupported_frontmatter_values.sort(key=_entry_sort_key)
 
-    prettier_unformatted: list[dict[str, str]] = []
-    if not prettier:
-        prettier_status = "skipped"
-    elif not has_prettier_config(vault_root):
-        prettier_status = "no-config"
-    else:
-        prettier_unformatted, prettier_errors = _prettier_findings(
-            vault_root, root_path, canonical_wiki_prefix, exclude_patterns
-        )
-        prettier_status = "failed" if prettier_errors else "checked"
-        configuration_errors.extend(prettier_errors)
-        prettier_unformatted.sort(key=_entry_sort_key)
-        configuration_errors.sort(key=_entry_sort_key)
-
     categories: dict[str, list[dict[str, Any]]] = {
         "dead_links": dead_links,
         "ambiguous_targets": ambiguous_targets,
@@ -2029,7 +1928,6 @@ def lint_vault(
         "hidden_target_links": hidden_target_links,
         "unsupported_fragments": unsupported_fragments,
         "invalid_frontmatter": invalid_frontmatter,
-        "prettier_unformatted": prettier_unformatted,
     }
     category_counts = {name: len(entries) for name, entries in categories.items()}
     issues_found = sum(category_counts.values())
@@ -2059,7 +1957,6 @@ def lint_vault(
             "property_links_scanned": property_links_scanned,
             "pdf_fragments_syntax_checked": pdf_fragments_syntax_checked,
             "unsupported_frontmatter_values": len(unsupported_frontmatter_values),
-            "prettier": prettier_status,
             "category_counts": category_counts,
         },
         "scope": {
@@ -2222,11 +2119,6 @@ def render_markdown(report: dict[str, Any]) -> str:
             "Configuration Errors",
             "configuration_errors",
             lambda item: f"- {_code(item['path'])}: {item['message']}",
-        ),
-        (
-            "Prettier Formatting",
-            "prettier_unformatted",
-            lambda item: f"- {_code(item['path'])}: Prettier would reformat this page",
         ),
         (
             "Provenance Errors",

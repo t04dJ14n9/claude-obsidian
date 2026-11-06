@@ -300,8 +300,7 @@ def command_hook_stop(args: argparse.Namespace) -> int:
 def command_lint(args: argparse.Namespace) -> int:
     selection = _selection(args)
     report = lint_vault(selection.root, as_of=args.as_of, exclude=args.exclude,
-                        frontmatter_policy=args.frontmatter_policy,
-                        prettier=not args.no_prettier)
+                        frontmatter_policy=args.frontmatter_policy)
     if args.format == "markdown":
         sys.stdout.write(render_markdown(report))
     else:
@@ -1111,14 +1110,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     lint.add_argument(
         "--strict", action="store_true", help="Exit 1 when findings exist"
-    )
-    lint.add_argument(
-        "--no-prettier",
-        action="store_true",
-        help=(
-            "Skip the Prettier check that runs 'npx prettier@latest "
-            "--list-different' when the vault root has a Prettier config"
-        ),
     )
     lint.set_defaults(handler=command_lint)
 
