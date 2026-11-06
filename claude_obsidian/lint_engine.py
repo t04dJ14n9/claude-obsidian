@@ -1565,81 +1565,97 @@ def _sanitize_report_value(value: Any) -> Any:
     return value
 
 
-# A vault opts into the Prettier check with one of these files at its root, or a
-# "prettier" key in package.json.
-_PRETTIER_CONFIG_FILES = (
-    ".prettierrc", ".prettierrc.json", ".prettierrc.json5", ".prettierrc.yaml",
-    ".prettierrc.yml", ".prettierrc.toml", ".prettierrc.js", ".prettierrc.cjs",
-    ".prettierrc.mjs", "prettier.config.js", "prettier.config.cjs", "prettier.config.mjs",
+# A vault opts into the markdownlint check with one of these files at its root,
+# or a "markdownlint-cli2" key in package.json.
+_MARKDOWNLINT_CONFIG_FILES = (
+    ".markdownlint-cli2.jsonc", ".markdownlint-cli2.yaml", ".markdownlint-cli2.cjs",
+    ".markdownlint-cli2.mjs", ".markdownlint.jsonc", ".markdownlint.json",
+    ".markdownlint.yaml", ".markdownlint.yml", ".markdownlint.cjs", ".markdownlint.mjs",
 )
-PRETTIER_TIMEOUT_SECONDS = 300
+MARKDOWNLINT_TIMEOUT_SECONDS = 300
+# markdownlint-cli2's default output: path:line[:column] severity MD001/alias description [detail]
+_MARKDOWNLINT_LINE_RE = re.compile(
+    r"^(?P<path>.+?):(?P<line>\d+)(?::(?P<column>\d+))? (?P<severity>error|warning) "
+    r"(?P<names>\S+) (?P<message>.*)$"
+)
 
 
-def has_prettier_config(vault_root: str | os.PathLike[str]) -> bool:
-    """Return whether the vault root declares a Prettier configuration."""
+def has_markdownlint_config(vault_root: str | os.PathLike[str]) -> bool:
+    """Return whether the vault root declares a markdownlint configuration."""
     root = Path(vault_root)
-    if any((root / name).is_file() for name in _PRETTIER_CONFIG_FILES):
+    if any((root / name).is_file() for name in _MARKDOWNLINT_CONFIG_FILES):
         return True
     try:
         package = json.loads((root / "package.json").read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError):
         return False
-    return isinstance(package, dict) and "prettier" in package
+    return isinstance(package, dict) and "markdownlint-cli2" in package
 
 
-def _prettier_findings(
+def _markdownlint_findings(
     vault_root: Path,
     root_path: Path,
     page_prefix: str,
     exclude_patterns: Sequence[str],
-) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    """List pages Prettier would reformat, and any error running it.
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Run markdownlint-cli2 on the wiki's pages; return findings and any error running it.
 
-    Runs ``npx prettier@latest --list-different`` from the vault root so the
-    vault's config and ``.prettierignore`` apply. Paths are reported relative
-    to the lint root, like every other finding.
+    Runs ``npx markdownlint-cli2@latest`` from the vault root so the vault's
+    config and ignores apply. ``--no-globs`` keeps the scope to the wiki
+    pattern. Paths are reported relative to the lint root, like every other
+    finding.
     """
     npx = shutil.which("npx")
     if npx is None:
         return [], [{
             "path": ".",
-            "reason": "prettier-unavailable",
-            "message": "the vault has a Prettier config, but npx is not on PATH; formatting was not checked",
+            "reason": "markdownlint-unavailable",
+            "message": "the vault has a markdownlint config, but npx is not on PATH; Markdown style was not checked",
         }]
-    command = [npx, "--yes", "prettier@latest", "--list-different",
-               "--no-error-on-unmatched-pattern", f"{page_prefix}/**/*.md"]
+    command = [npx, "--yes", "markdownlint-cli2@latest", "--no-globs", f"{page_prefix}/**/*.md"]
     try:
         result = subprocess.run(
             command, cwd=vault_root, stdin=subprocess.DEVNULL, capture_output=True,
             text=True, encoding="utf-8", errors="replace",
-            timeout=PRETTIER_TIMEOUT_SECONDS, check=False,
+            timeout=MARKDOWNLINT_TIMEOUT_SECONDS, check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return [], [{
             "path": ".",
-            "reason": "prettier-failed",
-            "message": f"npx prettier@latest did not finish: {exc.__class__.__name__}",
+            "reason": "markdownlint-failed",
+            "message": f"npx markdownlint-cli2@latest did not finish: {exc.__class__.__name__}",
         }]
-    # --list-different exits 1 when it lists files; anything else is an error.
+    # Exit 1 means findings were reported; anything else but 0 is an error.
     if result.returncode not in (0, 1):
         detail = " ".join(result.stderr.split())[-300:]
         return [], [{
             "path": ".",
-            "reason": "prettier-failed",
-            "message": f"npx prettier@latest exited {result.returncode}: {detail}",
+            "reason": "markdownlint-failed",
+            "message": f"npx markdownlint-cli2@latest exited {result.returncode}: {detail}",
         }]
     offset = root_path.relative_to(vault_root).as_posix()
-    unformatted: list[dict[str, str]] = []
-    for line in result.stdout.splitlines():
-        canonical = line.strip().replace("\\", "/")
-        if not canonical.endswith(".md"):
+    findings: list[dict[str, Any]] = []
+    for line in result.stderr.splitlines():
+        match = _MARKDOWNLINT_LINE_RE.match(line.strip())
+        if match is None:
             continue
+        canonical = match["path"].replace("\\", "/")
         relative = canonical if offset == "." else canonical.removeprefix(f"{offset}/")
-        if not _is_excluded(relative, exclude_patterns) and all(
+        if _is_excluded(relative, exclude_patterns) or not all(
             is_visible_path(part) for part in relative.split("/")
         ):
-            unformatted.append({"path": relative})
-    return unformatted, []
+            continue
+        entry: dict[str, Any] = {
+            "path": relative,
+            "line": int(match["line"]),
+            "rule": match["names"].split("/", 1)[0],
+            "severity": match["severity"],
+            "message": match["message"],
+        }
+        if match["column"]:
+            entry["column"] = int(match["column"])
+        findings.append(entry)
+    return findings, []
 
 
 def lint_vault(
@@ -1648,7 +1664,7 @@ def lint_vault(
     as_of: date | str | None = None,
     exclude: Sequence[str] | None = None,
     frontmatter_policy: str | None = None,
-    prettier: bool = False,
+    markdownlint: bool = False,
 ) -> dict[str, Any]:
     """Return a deterministic, JSON-serializable lint report.
 
@@ -1675,12 +1691,12 @@ def lint_vault(
     preserves existing adopted-vault vocabularies. Vault-side lint JSON may
     select the same profile with a ``frontmatter_policy`` property.
 
-    ``prettier=True`` also checks page formatting when the vault root has a
-    Prettier config: it runs ``npx prettier@latest --list-different`` on the
-    wiki's Markdown and reports the listed files as ``prettier_unformatted``.
-    That check may download Prettier from npm and depends on the release npm
-    serves, so it is off by default and the rest of the report stays
-    deterministic.
+    ``markdownlint=True`` also checks Markdown style when the vault root has a
+    markdownlint config: it runs ``npx markdownlint-cli2@latest`` on the
+    wiki's pages and reports each finding under ``markdownlint_findings``.
+    That check may download markdownlint-cli2 from npm and depends on the
+    release npm serves, so it is off by default and the rest of the report
+    stays deterministic.
     """
 
     root_path = Path(root).expanduser()
@@ -2001,18 +2017,18 @@ def lint_vault(
     invalid_frontmatter.sort(key=_entry_sort_key)
     unsupported_frontmatter_values.sort(key=_entry_sort_key)
 
-    prettier_unformatted: list[dict[str, str]] = []
-    if not prettier:
-        prettier_status = "skipped"
-    elif not has_prettier_config(vault_root):
-        prettier_status = "no-config"
+    markdownlint_findings: list[dict[str, Any]] = []
+    if not markdownlint:
+        markdownlint_status = "skipped"
+    elif not has_markdownlint_config(vault_root):
+        markdownlint_status = "no-config"
     else:
-        prettier_unformatted, prettier_errors = _prettier_findings(
+        markdownlint_findings, markdownlint_errors = _markdownlint_findings(
             vault_root, root_path, canonical_wiki_prefix, exclude_patterns
         )
-        prettier_status = "failed" if prettier_errors else "checked"
-        configuration_errors.extend(prettier_errors)
-        prettier_unformatted.sort(key=_entry_sort_key)
+        markdownlint_status = "failed" if markdownlint_errors else "checked"
+        configuration_errors.extend(markdownlint_errors)
+        markdownlint_findings.sort(key=_entry_sort_key)
         configuration_errors.sort(key=_entry_sort_key)
 
     categories: dict[str, list[dict[str, Any]]] = {
@@ -2029,7 +2045,7 @@ def lint_vault(
         "hidden_target_links": hidden_target_links,
         "unsupported_fragments": unsupported_fragments,
         "invalid_frontmatter": invalid_frontmatter,
-        "prettier_unformatted": prettier_unformatted,
+        "markdownlint_findings": markdownlint_findings,
     }
     category_counts = {name: len(entries) for name, entries in categories.items()}
     issues_found = sum(category_counts.values())
@@ -2059,7 +2075,7 @@ def lint_vault(
             "property_links_scanned": property_links_scanned,
             "pdf_fragments_syntax_checked": pdf_fragments_syntax_checked,
             "unsupported_frontmatter_values": len(unsupported_frontmatter_values),
-            "prettier": prettier_status,
+            "markdownlint": markdownlint_status,
             "category_counts": category_counts,
         },
         "scope": {
@@ -2224,9 +2240,9 @@ def render_markdown(report: dict[str, Any]) -> str:
             lambda item: f"- {_code(item['path'])}: {item['message']}",
         ),
         (
-            "Prettier Formatting",
-            "prettier_unformatted",
-            lambda item: f"- {_code(item['path'])}: Prettier would reformat this page",
+            "Markdownlint Findings",
+            "markdownlint_findings",
+            lambda item: f"- {_code(item['path'])}:{item['line']} {item['rule']} {item['message']}",
         ),
         (
             "Provenance Errors",

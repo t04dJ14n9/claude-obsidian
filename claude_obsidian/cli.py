@@ -301,7 +301,7 @@ def command_lint(args: argparse.Namespace) -> int:
     selection = _selection(args)
     report = lint_vault(selection.root, as_of=args.as_of, exclude=args.exclude,
                         frontmatter_policy=args.frontmatter_policy,
-                        prettier=not args.no_prettier)
+                        markdownlint=not args.no_markdownlint)
     if args.format == "markdown":
         sys.stdout.write(render_markdown(report))
     else:
@@ -1113,11 +1113,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--strict", action="store_true", help="Exit 1 when findings exist"
     )
     lint.add_argument(
-        "--no-prettier",
+        "--no-markdownlint",
         action="store_true",
         help=(
-            "Skip the Prettier check that runs 'npx prettier@latest "
-            "--list-different' when the vault root has a Prettier config"
+            "Skip the markdownlint check that runs 'npx markdownlint-cli2@latest' "
+            "when the vault root has a markdownlint config"
         ),
     )
     lint.set_defaults(handler=command_lint)
