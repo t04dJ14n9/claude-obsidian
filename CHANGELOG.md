@@ -16,6 +16,8 @@ implementation record for older releases.
 - Heading links ignore the same punctuation Obsidian ignores when matching
   (for example `[[Note#Step 1 Install pg]]` for `## Step 1. Install (pg)`), so
   links that jump in Obsidian no longer report `heading-not-found`.
+  Underscores now count, as in Obsidian: `[[Note#snakecase name]]` no longer
+  passes for `## snake_case name`.
 
 ## [3.0.1] - 2026-10-21
 

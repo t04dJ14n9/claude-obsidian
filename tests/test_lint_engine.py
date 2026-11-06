@@ -1581,6 +1581,20 @@ class ObsidianConformanceTests(unittest.TestCase):
             [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
         )
 
+    def test_heading_links_keep_underscores_like_obsidian(self) -> None:
+        report = self._lint({
+            "wiki/heads.md": self.FRONT + "# snake_case name\n\nx\n",
+            "wiki/user.md": self.FRONT + (
+                "[[heads#snake_case name]] [a](heads.md#snake_case-name)\n"
+                "[[heads#snakecase name]] [b](heads.md#snakecase-name)\n"
+            ),
+        })
+        self.assertEqual(
+            [("heads#snakecase name", "heading-not-found"),
+             ("heads.md#snakecase-name", "heading-not-found")],
+            [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
+        )
+
     def test_wikilink_targets_are_literal_but_markdown_destinations_decode(self) -> None:
         report = self._lint({
             "wiki/a%20b.md": self.FRONT + "Literal percent name.\n",

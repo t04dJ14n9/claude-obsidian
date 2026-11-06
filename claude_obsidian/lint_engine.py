@@ -461,7 +461,6 @@ def _heading_visible_text(value: str, *, render_inline: bool = True) -> str:
             cursor = match.end()
         pieces.append(value[cursor:])
         value = ''.join(pieces)
-    value = re.sub(r"[*_~`]+", "", value)
     value = _ATX_CLOSING_RE.sub("", value)
     return _HEADING_BLOCK_ID_RE.sub("", value)
 
@@ -477,8 +476,7 @@ def _github_heading_slugs(headings: list[str]) -> frozenset[str]:
     """Return the anchors GitHub's slugger gives these headings, in order.
 
     Markdown links may use them so heading links also jump on GitHub and in
-    VS Code. Visible text has already lost underscores, so links are compared
-    without them too.
+    VS Code.
     """
     slugs: set[str] = set()
     seen: dict[str, int] = {}
@@ -490,7 +488,7 @@ def _github_heading_slugs(headings: list[str]) -> frozenset[str]:
             seen[base] += 1
             slug = f"{base}-{seen[base]}"
         seen[slug] = 0
-        slugs.add(slug.replace("_", ""))
+        slugs.add(slug)
     return frozenset(slugs)
 
 
@@ -1346,7 +1344,7 @@ def _fragment_error(link: _Link, target: _Target) -> str | None:
     # Markdown links may also use GitHub slugs; Obsidian then opens the note
     # but does not jump to the heading.
     github_slug = (link.syntax == "markdown-link"
-                   and link.fragment.replace("_", "") in target.page.heading_slugs)
+                   and link.fragment in target.page.heading_slugs)
     if not github_slug and not _heading_path_exists(link.fragment, target.page):
         return "heading-not-found"
     return None
