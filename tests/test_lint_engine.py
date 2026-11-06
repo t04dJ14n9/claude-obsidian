@@ -1542,6 +1542,47 @@ class ObsidianConformanceTests(unittest.TestCase):
             [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
         )
 
+    def test_markdown_links_accept_github_heading_slugs(self) -> None:
+        report = self._lint({
+            ".obsidian/app.json": '{"useMarkdownLinks": true}',
+            "wiki/heads.md": self.FRONT + (
+                "# Use Postgres for storage\n\nx\n\n## Step 1: *Install* `pg`\n\ny\n\n"
+                "## Notes\n\na\n\n## Notes\n\nb\n\n## snake_case name\n\nc\n"
+            ),
+            "wiki/user.md": self.FRONT + (
+                "[a](heads.md#use-postgres-for-storage) [b](heads.md#Use%20Postgres%20for%20storage)\n"
+                "[c](heads.md#step-1-install-pg) [d](heads.md#notes) [e](heads.md#notes-1)\n"
+                "[f](heads.md#snake_case-name)\n"
+                "[g](heads.md#notes-2) [h](heads.md#Use-Postgres-for-storage)\n"
+                "[[heads#use-postgres-for-storage]] ![i](heads.md#use-postgres-for-storage)\n"
+            ),
+        })
+        self.assertEqual(
+            [
+                ("heads#use-postgres-for-storage", "heading-not-found"),
+                ("heads.md#Use-Postgres-for-storage", "heading-not-found"),
+                ("heads.md#notes-2", "heading-not-found"),
+                ("heads.md#use-postgres-for-storage", "heading-not-found"),
+            ],
+            sorted((entry["target"], entry["reason"]) for entry in report["dead_links"]),
+        )
+
+    def test_github_heading_slugs_need_markdown_links_setting(self) -> None:
+        pages = {
+            "wiki/heads.md": self.FRONT + "# Use Postgres\n\nx\n",
+            "wiki/user.md": self.FRONT + "[a](heads.md#use-postgres) [b](heads.md#Use%20Postgres)\n",
+        }
+        for settings in (None, '{"useMarkdownLinks": false}', "{not json"):
+            with self.subTest(settings=settings):
+                files = dict(pages)
+                if settings is not None:
+                    files[".obsidian/app.json"] = settings
+                report = self._lint(files)
+                self.assertEqual(
+                    [("heads.md#use-postgres", "heading-not-found")],
+                    [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
+                )
+
     def test_wikilink_targets_are_literal_but_markdown_destinations_decode(self) -> None:
         report = self._lint({
             "wiki/a%20b.md": self.FRONT + "Literal percent name.\n",

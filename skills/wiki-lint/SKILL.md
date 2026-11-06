@@ -40,6 +40,12 @@ The command remains read-only either way.
 
 The deterministic parser understands Obsidian wikilinks and embeds, Markdown
 links, aliases, heading and block fragments, escaped aliases, and code fences.
+A heading fragment names the heading text (`Note.md#Use%20Postgres`). When
+Obsidian's "Use [[Wikilinks]]" setting is off (`"useMarkdownLinks": true` in
+`.obsidian/app.json`), a Markdown link may instead use the GitHub slug
+(`Note.md#use-postgres`), which jumps on GitHub and in VS Code; Obsidian then
+opens the note without jumping to the heading. Wikilinks and embeds take
+heading text only.
 It skips dot-prefixed directories by default, mirroring Obsidian's own
 indexer. Link resolution honors `.gitignore` files inside the vault (no `git`
 subprocess): when a link is ambiguous between a page and a gitignored file

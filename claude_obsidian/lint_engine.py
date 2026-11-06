@@ -161,6 +161,7 @@ class _Page:
     heading_sections: tuple[tuple[int, int, int, str], ...]
     block_ids: frozenset[str]
     is_wiki_page: bool
+    heading_slugs: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -445,7 +446,7 @@ def _parse_frontmatter(text: str) -> _Frontmatter:
                         values, value_lines, tuple(property_ranges), frozenset(duplicate_fields))
 
 
-def _normalize_heading(value: str, *, render_inline: bool = True) -> str:
+def _heading_visible_text(value: str, *, render_inline: bool = True) -> str:
     value = html.unescape(urllib.parse.unquote(value))
     if render_inline:
         value = markdown_visible_text(value)
@@ -462,10 +463,35 @@ def _normalize_heading(value: str, *, render_inline: bool = True) -> str:
         value = ''.join(pieces)
     value = re.sub(r"[*_~`]+", "", value)
     value = _ATX_CLOSING_RE.sub("", value)
-    value = _HEADING_BLOCK_ID_RE.sub("", value)
+    return _HEADING_BLOCK_ID_RE.sub("", value)
+
+
+def _normalize_heading(value: str, *, render_inline: bool = True) -> str:
+    value = _heading_visible_text(value, render_inline=render_inline)
     exact = " ".join(value.split()).casefold()
     # A heading made only of stripped characters keeps its exact spelling.
     return " ".join(_HEADING_LINK_STRIPPED_RE.sub(" ", exact).split()) or exact
+
+
+def _github_heading_slugs(headings: list[str]) -> frozenset[str]:
+    """Return the anchors GitHub's slugger gives these headings, in order.
+
+    Markdown links may use them so heading links also jump on GitHub and in
+    VS Code. Visible text has already lost underscores, so links are compared
+    without them too.
+    """
+    slugs: set[str] = set()
+    seen: dict[str, int] = {}
+    for heading in headings:
+        base = re.sub(r"[^\w\- ]", "", _heading_visible_text(heading).strip().lower())
+        base = base.replace(" ", "-")
+        slug = base
+        while slug in seen:
+            seen[base] += 1
+            slug = f"{base}-{seen[base]}"
+        seen[slug] = 0
+        slugs.add(slug.replace("_", ""))
+    return frozenset(slugs)
 
 
 def _wikilink_visible_label(match: re.Match[str]) -> str:
@@ -608,6 +634,7 @@ def _page_metadata(
         masked=masked,
         frontmatter=frontmatter,
         headings=headings,
+        heading_slugs=_github_heading_slugs([heading for _, _, _, heading in parsed_headings]),
         heading_paths=tuple(heading_paths),
         heading_sections=tuple(parsed_headings),
         block_ids=block_ids,
@@ -1087,6 +1114,16 @@ def _is_allowlisted(link: _Link, patterns: Sequence[str]) -> bool:
     return False
 
 
+def _uses_markdown_links(root: Path) -> bool:
+    """Whether Obsidian's "Use [[Wikilinks]]" setting is off for this vault."""
+    try:
+        raw = _transaction_reader()(root, ".obsidian/app.json", limit=1024 * 1024)
+        settings = None if raw is None else strict_json_loads(raw.decode("utf-8"))
+    except Exception:
+        return False  # Obsidian's own settings are not lint findings.
+    return isinstance(settings, dict) and settings.get("useMarkdownLinks") is True
+
+
 def _frontmatter_policy(
     root: Path, requested: str | None
 ) -> tuple[str, list[dict[str, str]]]:
@@ -1296,7 +1333,7 @@ def _heading_path_exists(fragment: str, page: _Page) -> bool:
     return False
 
 
-def _fragment_error(link: _Link, target: _Target) -> str | None:
+def _fragment_error(link: _Link, target: _Target, *, github_slugs: bool = False) -> str | None:
     if link.fragment is None:
         return None
     if target.page is None:
@@ -1316,7 +1353,11 @@ def _fragment_error(link: _Link, target: _Target) -> str | None:
         if link.fragment.casefold() not in target.page.block_ids:
             return "block-not-found"
         return None
-    if not _heading_path_exists(link.fragment, target.page):
+    # In a Markdown-links vault, links may also use GitHub slugs; Obsidian
+    # then opens the note but does not jump to the heading.
+    github_slug = (github_slugs and link.syntax == "markdown-link"
+                   and link.fragment.replace("_", "") in target.page.heading_slugs)
+    if not github_slug and not _heading_path_exists(link.fragment, target.page):
         return "heading-not-found"
     return None
 
@@ -1589,6 +1630,7 @@ def lint_vault(
         raise ValueError("as_of must be an ISO date, date object, or null")
     patterns, config_exclude_patterns, configuration_errors = _load_allowlist(vault_root)
     selected_policy, policy_errors = _frontmatter_policy(vault_root, frontmatter_policy)
+    github_slugs = _uses_markdown_links(vault_root)
     configuration_errors.extend(policy_errors)
 
     all_paths = _walk_files(root_path)
@@ -1785,7 +1827,7 @@ def lint_vault(
             candidate = candidates[0]
             if candidate.path in incoming and candidate.path != link.source:
                 incoming[candidate.path].add(link.source)
-            fragment_reason = _fragment_error(link, candidate)
+            fragment_reason = _fragment_error(link, candidate, github_slugs=github_slugs)
             if fragment_reason is None:
                 if link.fragment is not None and PurePosixPath(candidate.path).suffix.casefold() == ".pdf":
                     pdf_fragments_syntax_checked += 1

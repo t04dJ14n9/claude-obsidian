@@ -7,6 +7,15 @@ implementation record for older releases.
 
 ## [Unreleased]
 
+### Changed
+
+- In vaults set to Markdown links (`"useMarkdownLinks": true` in
+  `.obsidian/app.json`), lint accepts GitHub heading slugs in Markdown links
+  (`Note.md#use-postgres`), so links written for GitHub or VS Code no longer
+  report `heading-not-found`. Obsidian opens such a link at the top of the note
+  instead of the heading, because it matches heading text, not slugs. Wikilinks
+  and other vaults are unchanged.
+
 ## [3.0.1] - 2026-10-21
 
 Restores the Claude plugin name `claude-obsidian`, so commands are
