@@ -112,8 +112,8 @@ _ATX_HEADING_RE = re.compile(
 )
 _ATX_CLOSING_RE = re.compile(r"(?<![ \t])[ \t]+#+[ \t]*$")
 _HEADING_BLOCK_ID_RE = re.compile(r"(?<![ \t])[ \t]+\^[A-Za-z0-9][A-Za-z0-9_-]*[ \t]*$")
-# Obsidian strips these from heading link text; compare both sides that way.
-_HEADING_LINK_STRIPPED_RE = re.compile(r"%%|[:|^#\[\]]")
+# Obsidian ignores these when matching a heading link; compare both sides that way.
+_HEADING_LINK_STRIPPED_RE = re.compile(r"[!\"#$%&()*+,.:;<=>?@^`{|}~/\[\]\\]")
 _SETEXT_UNDERLINE_RE = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
 _THEMATIC_BREAK_RE = re.compile(r"^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$")
 # One container marker: a blockquote or list item, with one following space.
@@ -161,6 +161,7 @@ class _Page:
     heading_sections: tuple[tuple[int, int, int, str], ...]
     block_ids: frozenset[str]
     is_wiki_page: bool
+    heading_slugs: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -445,7 +446,7 @@ def _parse_frontmatter(text: str) -> _Frontmatter:
                         values, value_lines, tuple(property_ranges), frozenset(duplicate_fields))
 
 
-def _normalize_heading(value: str, *, render_inline: bool = True) -> str:
+def _heading_visible_text(value: str, *, render_inline: bool = True) -> str:
     value = html.unescape(urllib.parse.unquote(value))
     if render_inline:
         value = markdown_visible_text(value)
@@ -460,12 +461,35 @@ def _normalize_heading(value: str, *, render_inline: bool = True) -> str:
             cursor = match.end()
         pieces.append(value[cursor:])
         value = ''.join(pieces)
-    value = re.sub(r"[*_~`]+", "", value)
     value = _ATX_CLOSING_RE.sub("", value)
-    value = _HEADING_BLOCK_ID_RE.sub("", value)
+    return _HEADING_BLOCK_ID_RE.sub("", value)
+
+
+def _normalize_heading(value: str, *, render_inline: bool = True) -> str:
+    value = _heading_visible_text(value, render_inline=render_inline)
     exact = " ".join(value.split()).casefold()
     # A heading made only of stripped characters keeps its exact spelling.
     return " ".join(_HEADING_LINK_STRIPPED_RE.sub(" ", exact).split()) or exact
+
+
+def _github_heading_slugs(headings: list[str]) -> frozenset[str]:
+    """Return the anchors GitHub's slugger gives these headings, in order.
+
+    Markdown links may use them so heading links also jump on GitHub and in
+    VS Code.
+    """
+    slugs: set[str] = set()
+    seen: dict[str, int] = {}
+    for heading in headings:
+        base = re.sub(r"[^\w\- ]", "", _heading_visible_text(heading).strip().lower())
+        base = base.replace(" ", "-")
+        slug = base
+        while slug in seen:
+            seen[base] += 1
+            slug = f"{base}-{seen[base]}"
+        seen[slug] = 0
+        slugs.add(slug)
+    return frozenset(slugs)
 
 
 def _wikilink_visible_label(match: re.Match[str]) -> str:
@@ -608,6 +632,7 @@ def _page_metadata(
         masked=masked,
         frontmatter=frontmatter,
         headings=headings,
+        heading_slugs=_github_heading_slugs([heading for _, _, _, heading in parsed_headings]),
         heading_paths=tuple(heading_paths),
         heading_sections=tuple(parsed_headings),
         block_ids=block_ids,
@@ -1316,7 +1341,11 @@ def _fragment_error(link: _Link, target: _Target) -> str | None:
         if link.fragment.casefold() not in target.page.block_ids:
             return "block-not-found"
         return None
-    if not _heading_path_exists(link.fragment, target.page):
+    # Markdown links may also use GitHub slugs; Obsidian then opens the note
+    # but does not jump to the heading.
+    github_slug = (link.syntax == "markdown-link"
+                   and link.fragment in target.page.heading_slugs)
+    if not github_slug and not _heading_path_exists(link.fragment, target.page):
         return "heading-not-found"
     return None
 

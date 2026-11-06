@@ -98,6 +98,9 @@ vault's dashboards and conventions understand.
 
 - Internal references use `[[Target]]` or `[[Target|Alias]]`.
 - Headings and block references use `[[Target#Heading]]` and `[[Target#^block]]`.
+- When Obsidian's `useMarkdownLinks` setting is on, notes link with relative
+  Markdown links and GitHub heading slugs instead, as described in
+  `skills/wiki/references/link-style.md`. Properties keep wikilinks.
 - Embeds use `![[Attachment.ext]]`.
 - Callouts use `> [!type] Title`.
 - Fenced code is data; link-like text inside it is not a graph edge.

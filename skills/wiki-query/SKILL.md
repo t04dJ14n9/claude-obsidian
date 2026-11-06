@@ -100,8 +100,8 @@ Read `wiki/meta/ledgers/claim-ledger.json` and
 ## Answer
 
 - Lead with the direct answer, then the evidence and caveats needed to use it.
-- Cite each material claim with the most specific available wikilink, such as
-  `[[Page#Heading]]`; include the underlying source page or evidence locator
+- Cite each material claim with the most specific available link in
+  [the vault's link style](../wiki/references/link-style.md), such as `[[Page#Heading]]`; include the underlying source page or evidence locator
   when present.
 - Distinguish vault evidence from your inference with explicit wording.
 - If the vault cannot answer, name the missing evidence and stop. Suggest

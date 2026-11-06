@@ -7,6 +7,27 @@ implementation record for older releases.
 
 ## [Unreleased]
 
+### Added
+
+- Markdown link style: when `.obsidian/app.json` sets `"useMarkdownLinks": true`,
+  ingest, save, fold, and query write vault links as relative Markdown links
+  with GitHub heading slugs (`[Use Postgres](../decisions/Storage.md#use-postgres)`),
+  so they open on GitHub and in VS Code as well as in Obsidian. Other vaults keep
+  wikilinks, and properties keep wikilinks in both. See
+  `skills/wiki/references/link-style.md`.
+
+### Changed
+
+- Lint accepts GitHub heading slugs in Markdown links (`Note.md#use-postgres`),
+  so links written for GitHub or VS Code no longer report `heading-not-found`.
+  Obsidian opens such a link at the top of the note instead of the heading,
+  because it matches heading text, not slugs. Wikilinks still need heading text.
+- Heading links ignore the same punctuation Obsidian ignores when matching
+  (for example `[[Note#Step 1 Install pg]]` for `## Step 1. Install (pg)`), so
+  links that jump in Obsidian no longer report `heading-not-found`.
+  Underscores now count, as in Obsidian: `[[Note#snakecase name]]` no longer
+  passes for `## snake_case name`.
+
 ## [3.0.1] - 2026-10-21
 
 Restores the Claude plugin name `claude-obsidian`, so commands are
