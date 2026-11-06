@@ -128,8 +128,6 @@ Read only the reference needed for the current request:
 - [dataview.md](references/dataview.md) for an existing optional Dataview setup;
 - [link-style.md](references/link-style.md) before writing links to vault
   files: wikilinks, or Markdown links when Obsidian's `useMarkdownLinks` is on;
-- [formatting.md](references/formatting.md) before writing pages to a vault
-  with a Prettier config: format drafts with Prettier, then check;
 - [knowledge-recipes.md](references/knowledge-recipes.md) for cited glossary or
   consolidation work;
 - [coordination.md](references/coordination.md) for external editors or multiple

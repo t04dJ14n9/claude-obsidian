@@ -68,10 +68,6 @@ not.
 
 Do not write the Markdown rendering into the vault. Return it in chat or stdout.
 
-When the vault has a Prettier config, also run the
-[formatting check](../wiki/references/formatting.md) and report its files
-separately: Prettier style is not an engine finding.
-
 ## Repair is a separate operation
 
 Never auto-fix a lint result. After the user chooses specific findings to

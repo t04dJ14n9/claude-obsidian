@@ -50,8 +50,7 @@ Follow [fold-template.md](references/fold-template.md). Every child log entry mu
 have one deterministic `child_key` in frontmatter and exactly one matching row
 in the Child Entries table. Do not deduplicate children by page, although the
 final Child Pages link list may be deduplicated. Write links in
-[the vault's link style](../wiki/references/link-style.md). When the vault has a
-Prettier config, [format the page](../wiki/references/formatting.md).
+[the vault's link style](../wiki/references/link-style.md).
 
 Every outcome must name its source entry. Every number must be verifiable in the
 selected entry. A cross-entry theme must name at least two contributing entries.
