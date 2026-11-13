@@ -10,11 +10,21 @@ implementation record for older releases.
 ### Added
 
 - Markdown link style: when `.obsidian/app.json` sets `"useMarkdownLinks": true`,
-  ingest, save, fold, and query write vault links as relative Markdown links
-  with GitHub heading slugs (`[Use Postgres](../decisions/Storage.md#use-postgres)`),
-  so they open on GitHub and in VS Code as well as in Obsidian. Other vaults keep
-  wikilinks, and properties keep wikilinks in both. See
-  `skills/wiki/references/link-style.md`.
+  ingest, save, fold, and query write vault links as vault-root-relative
+  Markdown links with GitHub heading slugs
+  (`[Use Postgres](/wiki/decisions/Storage.md#use-postgres)`), so they open on
+  GitHub and in VS Code as well as in Obsidian. Other vaults keep wikilinks, and
+  properties keep wikilinks in both. See `skills/wiki/references/link-style.md`.
+- Strict Markdown link resolution: `claude-obsidian lint` resolves standard
+  Markdown links (`[Label](/wiki/path.md)`, `![alt](/wiki/assets/image.png)`)
+  strictly by filesystem path with the exact file extension (from the vault root
+  when starting with `/`, or relative to the source note), without Obsidian's
+  basename, alias, `wiki/`-prefix, suffix, or extensionless fallback. Vaults
+  can set `"markdown_link_style": "vault-root"` in `.vault-meta/lint.json` to
+  reject file-relative Markdown links (`non-root-relative-link`), and
+  `"allow_hidden_links": [".raw/**"]` to permit verified Markdown links into
+  `.raw/` without reporting `hidden_target_links`. Wikilinks keep Obsidian's
+  vault-wide matching.
 - markdownlint check: `claude-obsidian lint` runs
   `npx markdownlint-cli2@latest --no-globs "wiki/**/*.md"` from the vault root
   when the vault has a markdownlint config (`.markdownlint-cli2.*`,

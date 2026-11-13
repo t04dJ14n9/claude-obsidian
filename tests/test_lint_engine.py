@@ -228,6 +228,33 @@ tags:
         self.assertEqual(1, len(report["ambiguous_targets"]))
         self.assertEqual("_index", report["ambiguous_targets"][0]["target"])
 
+    def test_duplicate_basename_exempt_config(self) -> None:
+        page = ("---\ntitle: {t}\ntype: session\nstatus: developing\ncreated: 2026-07-12\n"
+                "updated: 2026-07-12\ntags:\n  - project\n---\n\n# {t}\n\nText.\n")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in ("wiki/projects/A/decisions.md", "wiki/projects/B/decisions.md",
+                             "wiki/projects/A/notes.md", "wiki/projects/B/notes.md"):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(page.format(t=relative), encoding="utf-8")
+            (root / "wiki/index.md").write_text(
+                page.format(t="Index") + "\n- [[projects/A/decisions]]\n- [[projects/B/decisions]]\n"
+                "- [[projects/A/notes]]\n- [[projects/B/notes]]\n- [[decisions]]\n",
+                encoding="utf-8",
+            )
+            before = lint_engine.lint_vault(root, as_of="2026-07-12")
+            (root / ".vault-meta").mkdir()
+            (root / ".vault-meta/lint.json").write_text(
+                json.dumps({"duplicate_basename_exempt": ["Decisions"]}), encoding="utf-8"
+            )
+            after = lint_engine.lint_vault(root, as_of="2026-07-12")
+
+        self.assertEqual(["decisions", "notes"], [d["basename"] for d in before["duplicate_basenames"]])
+        self.assertEqual(["notes"], [d["basename"] for d in after["duplicate_basenames"]])
+        # the bare link stays ambiguous: exemption only silences the name rule
+        self.assertEqual(["decisions"], [a["target"] for a in after["ambiguous_targets"]])
+
     def test_orphans_frontmatter_empty_sections_and_allowlist(self) -> None:
         self.assertEqual([{"path": "wiki/concepts/Orphan.md"}], self.report["orphans"])
         self.assertEqual(1, len(self.report["missing_frontmatter"]))
@@ -1610,6 +1637,81 @@ class ObsidianConformanceTests(unittest.TestCase):
             ),
         })
         self.assertEqual([], report["dead_links"])
+
+    def test_markdown_links_require_strict_relative_or_root_path_and_extension(self) -> None:
+        report = self._lint({
+            ".obsidian/app.json": '{"useMarkdownLinks": true}',
+            "raw/captured/abc.md": "# Captured\n",
+            "wiki/resources/mocs/MOC.md": self.FRONT + "# MOC\n",
+            "wiki/resources/notes/Sib.md": self.FRONT + "# Sib\n",
+            "wiki/resources/notes/Note.md": self.FRONT.replace("---\n", "---\nrelated: \"[[MOC]]\"\n", 1) + (
+                "[ok-sib](Sib.md) "
+                "[ok-moc](../mocs/MOC.md) "
+                "[ok-root](/raw/captured/abc.md) "
+                "[[MOC]] [[mocs/MOC]]\n"
+                "[bad-basename](MOC.md) "
+                "[bad-suffix](mocs/MOC.md) "
+                "[bad-vault-rel](wiki/resources/mocs/MOC.md) "
+                "[bad-wiki-rel](resources/mocs/MOC.md) "
+                "[bad-extless](../mocs/MOC) "
+                "[bad-sib-extless](Sib) "
+                "[bad-root-basename](/MOC.md)\n"
+            ),
+        })
+        self.assertEqual(
+            [
+                ("../mocs/MOC", "target-not-found"),
+                ("/MOC.md", "target-not-found"),
+                ("MOC.md", "target-not-found"),
+                ("mocs/MOC.md", "target-not-found"),
+                ("resources/mocs/MOC.md", "target-not-found"),
+                ("Sib", "target-not-found"),
+                ("wiki/resources/mocs/MOC.md", "target-not-found"),
+            ],
+            [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
+        )
+
+    def test_markdown_link_style_vault_root_rejects_file_relative_links(self) -> None:
+        report = self._lint({
+            ".obsidian/app.json": '{"useMarkdownLinks": true}',
+            ".vault-meta/lint.json": json.dumps({
+                "markdown_link_style": "vault-root",
+                "allow_hidden_links": [".raw/**"],
+            }),
+            ".raw/captured/abc.md": "# Captured\n",
+            ".raw/captured/doc.pdf": "%PDF-1.4\n",
+            ".secret/hidden.txt": "Secret\n",
+            "wiki/resources/mocs/MOC.md": self.FRONT + "# MOC\n",
+            "wiki/resources/notes/Sib.md": self.FRONT + "# Sib\n",
+            "wiki/resources/notes/Note.md": self.FRONT.replace("---\n", "---\nrelated: \"[[MOC]]\"\n", 1) + (
+                "# Heading\n\n"
+                "[ok-sib](/wiki/resources/notes/Sib.md) "
+                "[ok-moc](/wiki/resources/mocs/MOC.md) "
+                "[ok-raw](/.raw/captured/abc.md) "
+                "[ok-raw-pdf](/.raw/captured/doc.pdf#page=2) "
+                "[ok-frag](#heading)\n"
+                "[bad-sib](Sib.md) "
+                "[bad-rel](../mocs/MOC.md) "
+                "[bad-vault-rel](wiki/resources/mocs/MOC.md) "
+                "[bad-raw-missing](/.raw/captured/missing.md) "
+                "[bad-raw-pdf](/.raw/captured/doc.pdf#page=bad) "
+                "[other-hidden](/.secret/hidden.txt)\n"
+            ),
+        })
+        self.assertEqual(
+            [
+                ("../mocs/MOC.md", "non-root-relative-link"),
+                ("/.raw/captured/doc.pdf#page=bad", "invalid-pdf-fragment"),
+                ("/.raw/captured/missing.md", "target-not-found"),
+                ("Sib.md", "non-root-relative-link"),
+                ("wiki/resources/mocs/MOC.md", "non-root-relative-link"),
+            ],
+            [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
+        )
+        self.assertEqual(
+            [("/.secret/hidden.txt", ".secret/hidden.txt")],
+            [(e["target"], e["resolved_path"]) for e in report["hidden_target_links"]],
+        )
 
     def test_wikilink_targets_are_literal_but_markdown_destinations_decode(self) -> None:
         report = self._lint({

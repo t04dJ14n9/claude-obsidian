@@ -40,6 +40,18 @@ The command remains read-only either way.
 
 The deterministic parser understands Obsidian wikilinks and embeds, Markdown
 links, aliases, heading and block fragments, escaped aliases, and code fences.
+Wikilinks and embeds (`[[Note]]`, `![[image.png]]`, and frontmatter property
+wikilinks) resolve using Obsidian's vault-wide matching (path, basename, alias,
+suffix, and extensionless `.md`/`.canvas`/`.base` lookup). Standard Markdown
+links and embeds (`[Label](/wiki/path.md)`, `![alt](/wiki/assets/image.png)`)
+resolve **strictly by filesystem path with the exact file extension** — from
+the vault root when starting with `/`, or relative to the current note's
+directory — and never fall back to basename, alias, `wiki/`-prefix, suffix,
+or extensionless lookup, so links broken in VS Code, Cursor, or GitHub are
+reported as `dead_links`. Vaults that configure `"markdown_link_style": "vault-root"`
+in `.vault-meta/lint.json` also reject non-root-relative Markdown links (`non-root-relative-link`),
+and `"allow_hidden_links": [".raw/**"]` allows verified Markdown links to existing
+files under `.raw/` instead of reporting `hidden_target_links`.
 A heading fragment names the heading text, matched as Obsidian does: case and
 punctuation such as `.` `(` `&` `?` `/` are ignored. A Markdown link may
 instead use the GitHub slug (`Note.md#use-postgres`), which jumps on GitHub

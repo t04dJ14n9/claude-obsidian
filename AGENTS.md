@@ -73,7 +73,7 @@ research merges require explicit consent.
 - `.vault-meta/`: ignored runtime locks, journals, indexes, queues, and config.
 
 Use Obsidian Flavored Markdown: flat YAML properties, `YYYY-MM-DD` dates,
-wikilinks (relative Markdown links when the vault sets `useMarkdownLinks`),
+wikilinks (vault-root-relative Markdown links when the vault sets `useMarkdownLinks`),
 embeds, and valid callouts. Never fabricate evidence locators,
 quotations, page numbers, or confidence.
 

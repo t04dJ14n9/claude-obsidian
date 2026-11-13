@@ -18,8 +18,7 @@ array, or an object with a ``dangling_links``-style array) or at
 The walk skips every dot-prefixed directory by default, mirroring Obsidian's
 own indexer, so a duplicated or archived page under a hidden folder (a
 ``.raw`` ingest archive, a ``.claude`` agent worktree, Obsidian's own
-``.trash``, and similar) is never a link-resolution candidate. ``exclude``
-globs, passed to ``lint_vault`` or set vault-side, scope specific paths out of
+``.trash``, and similar) is never a link-resolution candidate. ``exclude`` globs, passed to ``lint_vault`` or set vault-side, scope specific paths out of
 every finding category.
 
 Link resolution is gitignore-aware: when a wikilink resolves to multiple
@@ -827,9 +826,19 @@ def _link_queries(
     source = source_path or link.source
     if not raw:
         return raw, [source]
+    if link.markdown_relative:
+        # Standard Markdown links resolve strictly by path (relative to the
+        # source file's directory, or from the vault root when starting with `/`).
+        # They never fall back to vault/wiki-root, basename, alias, or suffix.
+        if raw.startswith("/"):
+            stripped = raw.lstrip("/")
+            if not stripped:
+                return "", []
+            return stripped, [posixpath.normpath(stripped)]
+        return raw, [posixpath.normpath(posixpath.join(posixpath.dirname(source), raw))]
     raw = raw.lstrip("/")
     queries: list[str] = []
-    if link.markdown_relative or raw.startswith(("./", "../")):
+    if raw.startswith(("./", "../")):
         queries.append(posixpath.normpath(posixpath.join(posixpath.dirname(source), raw)))
     queries.append(posixpath.normpath(raw))
     if wiki_prefix != "." and not raw.casefold().startswith("wiki/"):
@@ -874,7 +883,7 @@ def _confined_hidden_target(
         return None
     for query in _hidden_target_queries(link, wiki_prefix, source_path, within):
         variants = [query]
-        if not PurePosixPath(query).suffix:
+        if not link.markdown_relative and not PurePosixPath(query).suffix:
             variants.extend(query + suffix for suffix in sorted(_EXTENSIONLESS_WIKILINK_SUFFIXES))
         for variant in variants:
             descriptor = -1
@@ -937,13 +946,14 @@ class _Resolver:
             key=lambda item: (_path_sort_key(item.path), _path_sort_key(item._canonical_path)),
         )
 
-    def _exact(self, query: str) -> list[_Target]:
+    def _exact(self, query: str, *, allow_extensionless: bool = True) -> list[_Target]:
         normalized = posixpath.normpath(query.replace("\\", "/")).lstrip("/")
         if normalized in {"", "."}:
             return []
         candidates: list[_Target] = []
         candidates.extend(self.by_full.get(normalized.casefold(), ()))
-        candidates.extend(self.by_without_link_suffix.get(normalized.casefold(), ()))
+        if allow_extensionless:
+            candidates.extend(self.by_without_link_suffix.get(normalized.casefold(), ()))
         return self._deduplicate(candidates)
 
     def resolve(self, link: _Link) -> list[_Target]:
@@ -951,10 +961,14 @@ class _Resolver:
             link, self.wiki_prefix, self.source_paths.get(link.source)
         )
 
+        allow_extensionless = not link.markdown_relative
         for query in query_options:
-            exact = self._exact(query)
+            exact = self._exact(query, allow_extensionless=allow_extensionless)
             if exact:
                 return exact
+
+        if link.markdown_relative:
+            return []
 
         if "/" not in raw:
             candidates: list[_Target] = []
@@ -1008,6 +1022,24 @@ def _exclude_values(data: Any) -> list[str]:
     return values
 
 
+_DUPLICATE_EXEMPT_KEYS = {
+    "duplicate_basename_exempt",
+}
+
+
+def _duplicate_exempt_values(data: Any) -> list[str]:
+    """Basenames (or globs) a vault deliberately repeats, e.g. fixed per-project file names."""
+    if not isinstance(data, dict):
+        return []
+    values: list[str] = []
+    for key, value in data.items():
+        if str(key).casefold() in _DUPLICATE_EXEMPT_KEYS and isinstance(value, list):
+            values.extend(
+                item.strip() for item in value if isinstance(item, str) and item.strip()
+            )
+    return values
+
+
 def _normalize_exclude_patterns(values: Sequence[str] | None) -> tuple[str, ...]:
     if not values:
         return ()
@@ -1032,29 +1064,30 @@ def _is_excluded(relative: str, patterns: Sequence[str]) -> bool:
 
 def _load_allowlist(
     root: Path,
-) -> tuple[tuple[str, ...], tuple[str, ...], list[dict[str, str]]]:
+) -> tuple[tuple[str, ...], tuple[str, ...], list[dict[str, str]], tuple[str, ...]]:
     meta = root / ".vault-meta"
     patterns: list[str] = []
     exclude_patterns: list[str] = []
+    duplicate_exempt: list[str] = []
     errors: list[dict[str, str]] = []
     try:
         meta.lstat()
     except FileNotFoundError:
-        return (), (), []
+        return (), (), [], ()
     except OSError as exc:
         return (), (), [
             {
                 "path": ".vault-meta",
                 "message": f"cannot inspect allowlist directory: {exc.__class__.__name__}",
             }
-        ]
+        ], ()
     if meta.is_symlink() or not meta.is_dir():
         return (), (), [
             {
                 "path": ".vault-meta",
                 "message": "allowlist directory must be a non-symlink directory",
             }
-        ]
+        ], ()
     reader = _transaction_reader()
     for filename in _ALLOWLIST_JSON_NAMES:
         relative = f".vault-meta/{filename}"
@@ -1073,6 +1106,7 @@ def _load_allowlist(
             continue
         patterns.extend(_allowlist_values(data))
         exclude_patterns.extend(_exclude_values(data))
+        duplicate_exempt.extend(_duplicate_exempt_values(data))
 
     text_path = meta / "lint-allowlist.txt"
     try:
@@ -1093,6 +1127,7 @@ def _load_allowlist(
         tuple(sorted(set(patterns), key=_path_sort_key)),
         tuple(sorted(set(exclude_patterns), key=_path_sort_key)),
         sorted(errors, key=_entry_sort_key),
+        tuple(sorted(set(duplicate_exempt))),
     )
 
 
@@ -1144,6 +1179,55 @@ def _frontmatter_policy(
     if len(configured) > 1:
         errors.append({"path": ".vault-meta", "message": "conflicting frontmatter_policy settings; select one policy"})
     return (next(iter(configured)) if len(configured) == 1 else "presence"), errors
+
+
+def _markdown_link_style(root: Path) -> tuple[str, list[dict[str, str]]]:
+    configured: set[str] = set()
+    errors: list[dict[str, str]] = []
+    reader = _transaction_reader()
+    for filename in _ALLOWLIST_JSON_NAMES:
+        relative = f".vault-meta/{filename}"
+        try:
+            raw = reader(root, relative, limit=1024 * 1024)
+            if raw is None:
+                continue
+            payload = strict_json_loads(raw.decode("utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict) or "markdown_link_style" not in payload:
+            continue
+        style = payload["markdown_link_style"]
+        if not isinstance(style, str) or style not in {"any", "vault-root"}:
+            errors.append({"path": relative, "message": "markdown_link_style must be 'any' or 'vault-root'"})
+        else:
+            configured.add(style)
+    if len(configured) > 1:
+        errors.append({"path": ".vault-meta", "message": "conflicting markdown_link_style settings; select one style"})
+    return (next(iter(configured)) if len(configured) == 1 else "any"), errors
+
+
+def _allow_hidden_links(root: Path) -> tuple[tuple[str, ...], list[dict[str, str]]]:
+    """Glob patterns of dot-folder paths (e.g. ``.raw/**``) allowed as Markdown link targets."""
+    patterns: list[str] = []
+    errors: list[dict[str, str]] = []
+    reader = _transaction_reader()
+    for filename in _ALLOWLIST_JSON_NAMES:
+        relative = f".vault-meta/{filename}"
+        try:
+            raw = reader(root, relative, limit=1024 * 1024)
+            if raw is None:
+                continue
+            payload = strict_json_loads(raw.decode("utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict) or "allow_hidden_links" not in payload:
+            continue
+        value = payload["allow_hidden_links"]
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            errors.append({"path": relative, "message": "allow_hidden_links must be a list of path patterns"})
+        else:
+            patterns.extend(item.strip() for item in value if item.strip())
+    return tuple(sorted(set(patterns), key=_path_sort_key)), errors
 
 
 def _generated_frontmatter_errors(page: _Page) -> list[dict[str, Any]]:
@@ -1719,9 +1803,13 @@ def lint_vault(
             raise ValueError("as_of must be an ISO YYYY-MM-DD date") from exc
     else:
         raise ValueError("as_of must be an ISO date, date object, or null")
-    patterns, config_exclude_patterns, configuration_errors = _load_allowlist(vault_root)
+    patterns, config_exclude_patterns, configuration_errors, duplicate_exempt = _load_allowlist(vault_root)
     selected_policy, policy_errors = _frontmatter_policy(vault_root, frontmatter_policy)
     configuration_errors.extend(policy_errors)
+    selected_link_style, link_style_errors = _markdown_link_style(vault_root)
+    configuration_errors.extend(link_style_errors)
+    allow_hidden_patterns, hidden_link_errors = _allow_hidden_links(vault_root)
+    configuration_errors.extend(hidden_link_errors)
 
     all_paths = _walk_files(root_path)
     exclude_patterns = tuple(
@@ -1846,6 +1934,34 @@ def lint_vault(
         for link in _parse_links(page):
             links_scanned += 1
             property_links_scanned += link.syntax == "property-wikilink"
+            if (
+                selected_link_style == "vault-root"
+                and link.markdown_relative
+                and link.file_part.strip()
+                and not link.file_part.strip().startswith("/")
+            ):
+                reason = "non-root-relative-link"
+                if _is_allowlisted(link, patterns):
+                    allowlisted.append(
+                        {
+                            "source": link.source,
+                            "line": link.line,
+                            "target": link.target,
+                            "reason": reason,
+                        }
+                    )
+                    continue
+                entry = {
+                    "source": link.source,
+                    "line": link.line,
+                    "target": link.target,
+                    "syntax": link.syntax,
+                    "reason": reason,
+                }
+                dead_links.append(entry)
+                if is_index:
+                    stale_index_entries.append(entry.copy())
+                continue
             candidates = resolver.resolve(link)
             if len(candidates) > 1:
                 unignored = [
@@ -1875,6 +1991,31 @@ def lint_vault(
                     resolution_scope,
                 )
                 if hidden_path is not None:
+                    if link.markdown_relative and _is_excluded(hidden_path, allow_hidden_patterns):
+                        if link.fragment is None:
+                            continue
+                        if PurePosixPath(hidden_path).suffix.casefold() == ".pdf":
+                            if _valid_pdf_fragment(link.fragment):
+                                pdf_fragments_syntax_checked += 1
+                                continue
+                            fragment_reason = "invalid-pdf-fragment"
+                        else:
+                            fragment_reason = "fragment-on-non-markdown-target"
+                        if _is_allowlisted(link, patterns):
+                            allowlisted.append({
+                                "source": link.source, "line": link.line,
+                                "target": link.target, "reason": fragment_reason,
+                            })
+                            continue
+                        entry = {
+                            "source": link.source, "line": link.line,
+                            "target": link.target, "syntax": link.syntax,
+                            "reason": fragment_reason, "resolved_path": hidden_path,
+                        }
+                        dead_links.append(entry)
+                        if is_index:
+                            stale_index_entries.append(entry.copy())
+                        continue
                     hidden_target_links.append({
                         "source": link.source, "line": link.line, "target": link.target,
                         "syntax": link.syntax, "reason": "hidden-target-exists-not-indexed",
@@ -1965,6 +2106,12 @@ def lint_vault(
         # convention. An unsafe unqualified `[[_index]]` still appears in
         # `ambiguous_targets`; path-qualified links remain noise-free.
         if PurePosixPath(ordered[0].path).stem.casefold() == "_index":
+            continue
+        # A vault may list basenames it repeats on purpose (``duplicate_basename_exempt``
+        # in .vault-meta/lint.json), e.g. one ``decisions.md`` per project folder. Bare
+        # ``[[decisions]]`` links still surface in ``ambiguous_targets``.
+        stem = PurePosixPath(ordered[0].path).stem.casefold()
+        if any(fnmatch.fnmatchcase(stem, pattern.casefold()) for pattern in duplicate_exempt):
             continue
         duplicate_basenames.append(
             {

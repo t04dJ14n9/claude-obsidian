@@ -88,8 +88,8 @@ This paragraph is addressable. ^evidence-block
 
 Match the target filename exactly. Use a vault-relative folder path when a
 basename is ambiguous. Use standard Markdown links for external URLs. Link this
-vault's notes in [its link style](../wiki/references/link-style.md): wikilinks, or relative
-Markdown links when Obsidian's `useMarkdownLinks` setting is on.
+vault's notes in [its link style](../wiki/references/link-style.md): wikilinks, or
+vault-root-relative Markdown links when Obsidian's `useMarkdownLinks` setting is on.
 
 ## Callouts
 

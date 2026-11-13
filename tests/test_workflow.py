@@ -977,6 +977,19 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(workflow_module._links_to('[[' * 50000, 'wiki/x.md', 'wiki/index.md'))
         self.assertLess(time.monotonic() - started, 5.0)
 
+    def test_catalog_links_accept_vault_root_relative_markdown_links(self):
+        from claude_obsidian import workflow as workflow_module
+        self.assertTrue(workflow_module._links_to(
+            '# Index\n\n- [Example](/wiki/concepts/Example.md)\n',
+            'wiki/concepts/Example.md',
+            'wiki/index.md',
+        ))
+        self.assertTrue(workflow_module._links_to(
+            '# MOC\n\n- [Space Note](/wiki/resources/notes/Space%20Note.md#heading)\n',
+            'wiki/resources/notes/Space Note.md',
+            'wiki/resources/mocs/Test MOC.md',
+        ))
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

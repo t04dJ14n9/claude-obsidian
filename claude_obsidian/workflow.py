@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 import re
 import urllib.parse
 from datetime import date
@@ -223,7 +224,12 @@ def _catalog_links(text: str, catalog: str) -> tuple[frozenset[str], frozenset[s
         if destination.scheme or destination.netloc:
             continue
         target = urllib.parse.unquote(destination.path)
-        if target.startswith('/') or '\\' in target or any(ord(c) < 32 for c in target):
+        if '\\' in target or any(ord(c) < 32 for c in target):
+            continue
+        if target.startswith('/'):
+            norm = posixpath.normpath(target.lstrip('/'))
+            if norm not in {'', '.'} and not norm.startswith('..'):
+                resolved.add(norm)
             continue
         # Normalize a relative Markdown destination without reading any path.
         pieces = list(PurePosixPath(catalog).parent.parts)
