@@ -36,6 +36,11 @@ implementation record for older releases.
 
 ### Changed
 
+- Chat answers give vault paths without the leading `/`
+  (`wiki/resources/notes/Note.md`), so Cursor and VS Code chat panels can open
+  them; links in vault files keep the `/`. See
+  `skills/wiki/references/link-style.md`.
+
 - Lint accepts GitHub heading slugs in Markdown links (`Note.md#use-postgres`),
   so links written for GitHub or VS Code no longer report `heading-not-found`.
   Obsidian opens such a link at the top of the note instead of the heading,

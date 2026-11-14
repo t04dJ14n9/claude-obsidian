@@ -42,6 +42,11 @@ file in all three:
 - Link to a note rather than embedding it; GitHub cannot show a note embed.
 - Properties keep quoted wikilinks (`"[[Note]]"`) in both styles, because
   lint checks only wikilinks there.
-- In a chat answer rather than a vault file, write paths from the vault root.
+- In a chat answer rather than a vault file, write paths from the vault root
+  **without** the leading `/`: `wiki/resources/notes/Note.md`, or
+  `[Note](wiki/resources/notes/Note.md#heading)`. Editor chat panels (Cursor,
+  VS Code) resolve such a path from the open workspace folder, which is the
+  vault, but read a leading `/` as the top of the disk and cannot open it.
+  Links written into vault files keep the leading `/`.
 
 Never convert a page's existing links as a side effect of another edit.
