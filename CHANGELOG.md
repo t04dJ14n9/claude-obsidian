@@ -7,6 +7,11 @@ implementation record for older releases.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-11-15
+
+First release of the fork https://github.com/t04dJ14n9/claude-obsidian. Every
+entry below is fork-only; upstream is still at 3.0.1.
+
 ### Added
 
 - Markdown link style: when `.obsidian/app.json` sets `"useMarkdownLinks": true`,
@@ -15,24 +20,29 @@ implementation record for older releases.
   (`[Use Postgres](/wiki/decisions/Storage.md#use-postgres)`), so they open on
   GitHub and in VS Code as well as in Obsidian. Other vaults keep wikilinks, and
   properties keep wikilinks in both. See `skills/wiki/references/link-style.md`.
-- Strict Markdown link resolution: `claude-obsidian lint` resolves standard
-  Markdown links (`[Label](/wiki/path.md)`, `![alt](/wiki/assets/image.png)`)
-  strictly by filesystem path with the exact file extension (from the vault root
-  when starting with `/`, or relative to the source note), without Obsidian's
-  basename, alias, `wiki/`-prefix, suffix, or extensionless fallback. Vaults
-  can set `"markdown_link_style": "vault-root"` in `.vault-meta/lint.json` to
-  reject file-relative Markdown links (`non-root-relative-link`), and
-  `"allow_hidden_links": [".raw/**"]` to permit verified Markdown links into
-  `.raw/` without reporting `hidden_target_links`. Wikilinks keep Obsidian's
+- Link styles for lint: `"markdown_link_style"` in `.vault-meta/lint.json`.
+  `"any"` (the default) resolves Markdown links like Obsidian. `"path"`
+  resolves them strictly by filesystem path with the exact extension (from the
+  vault root when starting with `/`, or relative to the note), without
+  basename, alias, `wiki/`-prefix, suffix, or extensionless fallback.
+  `"vault-root"` is as strict and also reports file-relative links
+  (`non-root-relative-link`); the link still counts as incoming, so its target
+  is not also reported as an orphan. `"allow_hidden_links": [".raw/**"]`
+  permits verified Markdown links into `.raw/` without reporting
+  `hidden_target_links`; a heading fragment on such a Markdown target is not
+  checked, because hidden pages are not indexed. Wikilinks keep Obsidian's
   vault-wide matching.
-- markdownlint check: `claude-obsidian lint` runs
-  `npx markdownlint-cli2@latest --no-globs "wiki/**/*.md"` from the vault root
-  when the vault has a markdownlint config (`.markdownlint-cli2.*`,
-  `.markdownlint.*`, or a `markdownlint-cli2` key in `package.json`), and
-  reports each finding (path, line, rule, message) as `markdownlint_findings`,
-  which `--strict` counts. A missing `npx` or a failed run is a configuration
-  error. `--no-markdownlint` skips it; `lint_vault()` and checkpoint lint keep
-  it off, so they stay offline and deterministic.
+- `"duplicate_basename_exempt"` in `.vault-meta/lint.json` lists basenames (or
+  globs) a vault repeats on purpose, such as one `overview.md` per project, so
+  lint does not report them as duplicates.
+- Code repositories: `skills/wiki/references/code-repositories.md` (routed from
+  the `wiki` skill) keeps code out of vaults and managed with `ghq`
+  (`<ghq root>/<host>/<owner>/<repo>`), links pages to checkouts by remote URL,
+  and selects the vault from a checkout through a `.claude-obsidian.json` at the
+  `ghq` root or in a host directory.
+- `init` and `adopt` seed a starter `AGENTS.md` with the vault's working rules,
+  so agents that open the vault read them without a skill. `adopt` never
+  replaces an existing `AGENTS.md`.
 
 ### Changed
 
@@ -40,16 +50,27 @@ implementation record for older releases.
   (`wiki/resources/notes/Note.md`), so Cursor and VS Code chat panels can open
   them; links in vault files keep the `/`. See
   `skills/wiki/references/link-style.md`.
-
 - Lint accepts GitHub heading slugs in Markdown links (`Note.md#use-postgres`),
   so links written for GitHub or VS Code no longer report `heading-not-found`.
   Obsidian opens such a link at the top of the note instead of the heading,
   because it matches heading text, not slugs. Wikilinks still need heading text.
+  Slugs follow GitHub's rendering: combining marks are kept, nothing is
+  percent-decoded, underscore emphasis and HTML tags are removed, and code
+  spans stay literal.
 - Heading links ignore the same punctuation Obsidian ignores when matching
   (for example `[[Note#Step 1 Install pg]]` for `## Step 1. Install (pg)`), so
   links that jump in Obsidian no longer report `heading-not-found`.
-  Underscores now count, as in Obsidian: `[[Note#snakecase name]]` no longer
-  passes for `## snake_case name`.
+  Underscores and other emphasis markers now count, as in Obsidian:
+  `[[Note#snakecase name]]` no longer passes for `## snake_case name`, nor
+  `[[Note#Italic text]]` for `## _Italic_ text`.
+
+### Fixed
+
+- Running the core from inside the product checkout no longer selects a vault
+  through a `.claude-obsidian.json` in a parent directory (such as a `ghq`
+  root); implicit discovery there fails closed as documented.
+- Catalog navigation accepts vault-root Markdown links into directories whose
+  names start with `..` (such as `..notes/`) while still rejecting `/../`.
 
 ## [3.0.1] - 2026-10-21
 

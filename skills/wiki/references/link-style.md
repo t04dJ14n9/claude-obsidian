@@ -27,15 +27,17 @@ file in all three:
 
 - Path: relative to the vault root with a leading `/`, with the file
   extension, and spaces encoded as `%20` (for example `/wiki/resources/notes/Note.md`
-  or `/.raw/captured/<sha256>.md`). `claude-obsidian lint` resolves Markdown
-  links strictly by filesystem path (no basename, alias, `wiki/`-prefix,
-  suffix, or extensionless fallback), and vaults with `"markdown_link_style":
-  "vault-root"` in `.vault-meta/lint.json` reject file-relative links such as
-  `Note.md` or `../areas/Area.md`. Vaults that link directly into `.raw/` set
-  `"allow_hidden_links": [".raw/**"]` in `.vault-meta/lint.json`. Same-page
-  anchors stay `#heading-slug`.
-- Heading: the GitHub slug of the visible heading text. Lowercase it, drop
-  punctuation except `-` and `_`, and replace each space with `-`. A repeated
+  or `/.raw/captured/<sha256>.md`). Same-page anchors stay `#heading-slug`.
+- Lint: `"markdown_link_style"` in `.vault-meta/lint.json` decides how
+  `claude-obsidian lint` resolves Markdown links. `"any"` (the default) matches
+  them like Obsidian, with basename, alias, and suffix fallbacks. `"path"`
+  resolves them strictly by filesystem path, relative to the note or from the
+  vault root. `"vault-root"`, which suits this style, is as strict and also
+  reports file-relative links such as `Note.md` or `../areas/Area.md`. Vaults
+  that link directly into `.raw/` set `"allow_hidden_links": [".raw/**"]`.
+- Heading: the GitHub slug of the heading as GitHub renders it (emphasis and
+  HTML tags removed, code kept). Lowercase it, drop punctuation except `-` and
+  `_`, and replace each space with `-`. A repeated
   slug gets `-1` on its second use, `-2` on its third. The link jumps to the
   heading on GitHub and in VS Code; Obsidian opens the note at the top.
 - Blocks jump only in Obsidian; GitHub opens the note.

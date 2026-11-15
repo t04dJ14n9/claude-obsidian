@@ -1,7 +1,13 @@
 # claude-obsidian: Agent Instructions
 
-claude-obsidian is a local-first Agent Skills package for building source-cited,
-compounding Obsidian knowledge bases. It also ships a Claude Code plugin adapter.
+claude-obsidian is a local-first Agent Skills package for building
+source-cited, compounding Obsidian knowledge bases. It also ships a Claude Code
+plugin adapter.
+
+This checkout is the fork https://github.com/t04dJ14n9/claude-obsidian of
+https://github.com/AgriciDaniel/claude-obsidian. Fork-only behavior is listed
+under `[Unreleased]` and fork releases in `CHANGELOG.md`; keep it there so it
+can be proposed upstream or dropped deliberately.
 The portable workflow is implemented in `skills/` and the standard-library
 `claude_obsidian/` core; host hooks never define knowledge behavior.
 
@@ -23,6 +29,9 @@ The portable workflow is implemented in `skills/` and the standard-library
 Resolve a vault in this order: explicit `--vault`,
 `CLAUDE_OBSIDIAN_VAULT`, nearest `.claude-obsidian.json`, then an unambiguous
 vault at or above the current directory. Fail closed when no vault is selected.
+Implicit discovery from inside the product tree always fails, even under a
+`.claude-obsidian.json` in a parent directory (such as a `ghq` root); pass
+`--vault` when running the core from this checkout.
 
 ## Bootstrap
 
@@ -31,8 +40,11 @@ vault at or above the current directory. Fail closed when no vault is selected.
 2. Read the selected skill completely.
 3. Read only the references that skill routes to.
 4. Resolve the user vault. If `wiki/hot.md` exists, read it silently.
-5. For a new vault, run `python3 scripts/claude-obsidian.py init PATH` first;
-   apply only after reviewing the dry run. Use `adopt` for an existing vault.
+5. For a new vault, run `python3 "$PRODUCT_ROOT/scripts/claude-obsidian.py"
+   init PATH` first, with `PRODUCT_ROOT` resolved from the skill's own location,
+   never from the vault; apply only after reviewing the dry run. Use `adopt`
+   for an existing vault. Both seed a starter `AGENTS.md` and never replace an
+   existing one.
 
 ## Canonical skills
 
@@ -73,9 +85,10 @@ research merges require explicit consent.
 - `.vault-meta/`: ignored runtime locks, journals, indexes, queues, and config.
 
 Use Obsidian Flavored Markdown: flat YAML properties, `YYYY-MM-DD` dates,
-wikilinks (vault-root-relative Markdown links when the vault sets `useMarkdownLinks`),
-embeds, and valid callouts. Never fabricate evidence locators,
-quotations, page numbers, or confidence.
+wikilinks (vault-root-relative Markdown links when the vault sets
+`useMarkdownLinks`), embeds, and valid callouts. Never fabricate evidence
+locators, quotations, page numbers, or confidence. Code checkouts live outside
+vaults; see `skills/wiki/references/code-repositories.md`.
 
 ## Verification
 
@@ -93,6 +106,8 @@ workspace-configured vault outside the project also requires an exact
 
 ## Reference
 
-- Public canonical repository: https://github.com/AgriciDaniel/claude-obsidian
-- LLM Wiki pattern: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
+- Upstream repository: https://github.com/AgriciDaniel/claude-obsidian
+- This fork: https://github.com/t04dJ14n9/claude-obsidian
+- LLM Wiki pattern:
+  https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 - Obsidian primitives: https://github.com/kepano/obsidian-skills

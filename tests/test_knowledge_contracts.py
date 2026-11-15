@@ -170,6 +170,7 @@ class KnowledgeContractTests(unittest.TestCase):
                 "vault:.vault-meta/address-counter.txt",
                 "vault:.vault-meta/legacy-pages.txt",
                 "vault:.vault-meta/tiling-thresholds.json",
+                "vault:AGENTS.md",
                 "vault:inbox/.gitkeep",
                 "vault:wiki/hot.md",
                 "vault:wiki/index.md",

@@ -206,8 +206,9 @@ def _navigation_sources(text: str) -> tuple[str, tuple[str, ...]]:
 def _catalog_links(text: str, catalog: str) -> tuple[frozenset[str], frozenset[str]]:
     """Parse one catalog's navigation once: wikilink targets and resolved paths.
 
-    Wikilink targets keep their written form; relative Markdown destinations
-    are normalized against the catalog directory and never escape the vault.
+    Wikilink targets keep their written form. Markdown destinations starting
+    with ``/`` are vault-root paths; relative ones are normalized against the
+    catalog directory. Neither may escape the vault.
     """
     # Exclude comments/examples. Active flat metadata links remain candidates.
     masked, property_values = _navigation_sources(text)
@@ -228,7 +229,7 @@ def _catalog_links(text: str, catalog: str) -> tuple[frozenset[str], frozenset[s
             continue
         if target.startswith('/'):
             norm = posixpath.normpath(target.lstrip('/'))
-            if norm not in {'', '.'} and not norm.startswith('..'):
+            if norm not in {'', '.'} and norm != '..' and not norm.startswith('../'):
                 resolved.add(norm)
             continue
         # Normalize a relative Markdown destination without reading any path.

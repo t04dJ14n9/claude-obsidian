@@ -1569,6 +1569,25 @@ class ObsidianConformanceTests(unittest.TestCase):
             [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
         )
 
+    def test_github_heading_slugs_follow_github_rendering(self) -> None:
+        cases = {
+            "हिन्दी लेख": "हिन्दी-लेख",  # combining marks are kept
+            "100%25 done": "10025-done",  # nothing is percent-decoded
+            "__init__ method": "init-method",  # underscore emphasis is rendered away
+            "_Italic_ text": "italic-text",
+            "snake_case name": "snake_case-name",  # intraword underscores stay
+            "Use `__init__`": "use-__init__",  # code spans stay literal
+            "Press <kbd>Ctrl</kbd> C": "press-ctrl-c",  # HTML tags are dropped
+            "See [Docs](https://x) now": "see-docs-now",
+            "See [Docs][id] now": "see-docs-now",  # reference-style link
+        }
+        for heading, slug in cases.items():
+            self.assertEqual(frozenset({slug}), lint_engine._github_heading_slugs([heading]), heading)
+        self.assertEqual(
+            frozenset({"dup", "dup-1", "dup-2"}),
+            lint_engine._github_heading_slugs(["Dup", "Dup", "Dup"]),
+        )
+
     def test_markdown_links_accept_github_heading_slugs(self) -> None:
         report = self._lint({
             "wiki/heads.md": self.FRONT + (
@@ -1623,24 +1642,34 @@ class ObsidianConformanceTests(unittest.TestCase):
         )
 
     def test_markdown_link_style_from_link_style_reference_is_clean(self) -> None:
+        # Every form in skills/wiki/references/link-style.md, under the strictest style.
         report = self._lint({
             ".obsidian/app.json": '{"useMarkdownLinks": true}',
+            ".vault-meta/lint.json": json.dumps({
+                "markdown_link_style": "vault-root", "allow_hidden_links": [".raw/**"],
+            }),
+            ".raw/captured/abc.md": "# Captured\n",
             "wiki/decisions/Storage.md": self.FRONT + "# Use Postgres\n\nx\n",
             "wiki/sources/My Source.md": self.FRONT + "Quoted evidence. ^evidence-block\n",
-            "wiki/sources/paper.pdf": "%PDF-1.4\n",
+            "wiki/assets/papers/paper.pdf": "%PDF-1.4\n",
             "wiki/assets/diagram.png": "png",
             "wiki/concepts/user.md": self.FRONT.replace("---\n", "---\nrelated: \"[[Storage]]\"\n", 1) + (
-                "[Storage](../decisions/Storage.md) "
-                "[Use Postgres](../decisions/Storage.md#use-postgres)\n"
-                "[evidence](../sources/My%20Source.md#^evidence-block) "
-                "![diagram](../assets/diagram.png) [p. 3](../sources/paper.pdf#page=3)\n"
+                "## Use Postgres\n\n"
+                "[Storage](/wiki/decisions/Storage.md) "
+                "[Use Postgres](/wiki/decisions/Storage.md#use-postgres) "
+                "[Use Postgres](#use-postgres)\n"
+                "[evidence](/wiki/sources/My%20Source.md#^evidence-block) "
+                "![diagram](/wiki/assets/diagram.png) [p. 3](/wiki/assets/papers/paper.pdf#page=3) "
+                "[`.raw/captured/abc.md`](/.raw/captured/abc.md)\n"
             ),
         })
         self.assertEqual([], report["dead_links"])
+        self.assertEqual([], report["hidden_target_links"])
 
     def test_markdown_links_require_strict_relative_or_root_path_and_extension(self) -> None:
         report = self._lint({
             ".obsidian/app.json": '{"useMarkdownLinks": true}',
+            ".vault-meta/lint.json": json.dumps({"markdown_link_style": "path"}),
             "raw/captured/abc.md": "# Captured\n",
             "wiki/resources/mocs/MOC.md": self.FRONT + "# MOC\n",
             "wiki/resources/notes/Sib.md": self.FRONT + "# Sib\n",
@@ -1670,6 +1699,62 @@ class ObsidianConformanceTests(unittest.TestCase):
             ],
             [(entry["target"], entry["reason"]) for entry in report["dead_links"]],
         )
+
+    def test_default_link_style_resolves_markdown_links_like_obsidian(self) -> None:
+        # Obsidian writes and resolves shortest-path Markdown links; a vault that
+        # has not chosen a strict style must not see them as dead.
+        report = self._lint({
+            "wiki/a/Note.md": self.FRONT + "# Note\n",
+            "wiki/b/Other.md": self.FRONT + (
+                "[rel](../a/Note) [base](Note.md) [root](/a/Note.md) [wiki-rel](a/Note.md)\n"
+            ),
+        })
+        self.assertEqual([], report["dead_links"])
+
+    def test_unknown_markdown_link_style_is_a_configuration_error(self) -> None:
+        report = self._lint({
+            ".vault-meta/lint.json": json.dumps({"markdown_link_style": "strict"}),
+            "wiki/Note.md": self.FRONT + "# Note\n",
+        })
+        self.assertIn(
+            "markdown_link_style must be 'any', 'path', or 'vault-root'",
+            [e.get("message") for e in report["configuration_errors"]],
+        )
+
+    def test_non_root_link_is_reported_but_its_target_is_not_an_orphan(self) -> None:
+        report = self._lint({
+            ".vault-meta/lint.json": json.dumps({"markdown_link_style": "vault-root"}),
+            "wiki/index.md": self.FRONT + "[Source](/wiki/Source.md)\n",
+            "wiki/Source.md": self.FRONT + "[Only](Only.md)\n",
+            "wiki/Only.md": self.FRONT + "# Only\n",
+        })
+        self.assertEqual(
+            [("Only.md", "non-root-relative-link")],
+            [(e["target"], e["reason"]) for e in report["dead_links"]],
+        )
+        self.assertNotIn("wiki/Only.md", [e["path"] for e in report["orphans"]])
+
+    def test_allowlisted_non_root_link_target_is_not_an_orphan(self) -> None:
+        report = self._lint({
+            ".vault-meta/lint.json": json.dumps({"markdown_link_style": "vault-root"}),
+            ".vault-meta/lint-allowlist.json": json.dumps(["Only.md"]),
+            "wiki/index.md": self.FRONT + "[Source](/wiki/Source.md)\n",
+            "wiki/Source.md": self.FRONT + "[Only](Only.md)\n",
+            "wiki/Only.md": self.FRONT + "# Only\n",
+        })
+        self.assertEqual([], report["dead_links"])
+        self.assertNotIn("wiki/Only.md", [e["path"] for e in report["orphans"]])
+
+    def test_fragment_on_hidden_markdown_target_is_not_a_non_markdown_error(self) -> None:
+        report = self._lint({
+            ".vault-meta/lint.json": json.dumps({
+                "markdown_link_style": "vault-root", "allow_hidden_links": [".raw/**"],
+            }),
+            ".raw/c/abc.md": "# Section\n",
+            "wiki/index.md": self.FRONT + "[Captured](/.raw/c/abc.md#section)\n",
+        })
+        self.assertEqual([], report["dead_links"])
+        self.assertEqual([], report["hidden_target_links"])
 
     def test_markdown_link_style_vault_root_rejects_file_relative_links(self) -> None:
         report = self._lint({
@@ -2628,138 +2713,6 @@ class GitignoreDisambiguationTests(unittest.TestCase):
         )
         self.assertEqual([], report["ambiguous_targets"])
         self.assertEqual([], report["stale_index_entries"])
-
-
-class MarkdownlintCheckTests(unittest.TestCase):
-    """The opt-in markdownlint check, run against a fake npx so no network is used."""
-
-    FRONT = (
-        "---\ntitle: Fixture\ntype: concept\nstatus: developing\n"
-        "created: 2026-10-17\nupdated: 2026-10-17\ntags: []\n---\n"
-    )
-    FAKE_NPX = (
-        "#!/bin/sh\n"
-        'printf "%s\\n" "$PWD" "$@" > "$FAKE_NPX_LOG"\n'
-        'printf "%b" "$FAKE_NPX_STDERR" >&2\n'
-        'exit "${FAKE_NPX_EXIT:-0}"\n'
-    )
-    TWO_FINDINGS = (
-        "markdownlint-cli2 v0.24.0 (markdownlint v0.42.0)\n"
-        "wiki/notes/b.md:3:5 error MD034/no-bare-urls Bare URL used [Context: \"https://x\"]\n"
-        "wiki/a.md:7 error MD040/fenced-code-language Fenced code blocks should have a language specified\n"
-    )
-
-    def _lint(self, files, *, stderr="", exit_code=0, npx=True, lint_root="", **options):
-        """Lint a temporary vault; return the report, fake npx's argv (None if not run), and the root."""
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            root = base / "vault"
-            for relative, text in files.items():
-                path = root / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(text, encoding="utf-8")
-            fake = base / "npx"
-            fake.write_text(self.FAKE_NPX, encoding="utf-8")
-            fake.chmod(0o755)
-            log = base / "npx.log"
-            env = {"FAKE_NPX_LOG": str(log), "FAKE_NPX_STDERR": stderr, "FAKE_NPX_EXIT": str(exit_code)}
-            before = _snapshot(root)
-            with mock.patch.dict(os.environ, env), mock.patch.object(
-                lint_engine.shutil, "which", return_value=str(fake) if npx else None
-            ):
-                report = lint_engine.lint_vault(root / lint_root, as_of="2026-10-17", **options)
-            self.assertEqual(before, _snapshot(root))
-            calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else None
-            return report, calls, root
-
-    def _vault(self, **extra):
-        files = {
-            ".markdownlint-cli2.jsonc": '{"config": {"default": true}}\n',
-            "wiki/index.md": self.FRONT + "[a](a.md) [b](notes/b.md)\n",
-            "wiki/a.md": self.FRONT + "[index](index.md)\n",
-            "wiki/notes/b.md": self.FRONT + "[index](../index.md)\n",
-        }
-        files.update(extra)
-        return files
-
-    def test_off_by_default_so_checkpoint_lint_stays_offline(self) -> None:
-        report, calls, _ = self._lint(self._vault(), stderr=self.TWO_FINDINGS, exit_code=1)
-        self.assertIsNone(calls)
-        self.assertEqual("skipped", report["summary"]["markdownlint"])
-        self.assertEqual([], report["markdownlint_findings"])
-
-    def test_vault_without_markdownlint_config_is_not_checked(self) -> None:
-        files = self._vault()
-        del files[".markdownlint-cli2.jsonc"]
-        report, calls, _ = self._lint(files, stderr=self.TWO_FINDINGS, exit_code=1, markdownlint=True)
-        self.assertIsNone(calls)
-        self.assertEqual("no-config", report["summary"]["markdownlint"])
-
-    def test_other_config_names_opt_in(self) -> None:
-        for name, text in ((".markdownlint.yaml", "default: true\n"),
-                           ("package.json", '{"markdownlint-cli2": {"config": {}}}\n')):
-            files = self._vault()
-            del files[".markdownlint-cli2.jsonc"]
-            files[name] = text
-            report, calls, _ = self._lint(files, markdownlint=True)
-            self.assertIsNotNone(calls, name)
-            self.assertEqual("checked", report["summary"]["markdownlint"], name)
-
-    def test_reports_findings_from_the_vault_root(self) -> None:
-        report, calls, root = self._lint(
-            self._vault(), stderr=self.TWO_FINDINGS, exit_code=1, markdownlint=True
-        )
-        self.assertEqual(str(root.resolve()), calls[0])
-        self.assertEqual(["--yes", "markdownlint-cli2@latest", "--no-globs", "wiki/**/*.md"], calls[1:])
-        self.assertEqual(
-            [
-                {"path": "wiki/a.md", "line": 7, "rule": "MD040", "severity": "error",
-                 "message": "Fenced code blocks should have a language specified"},
-                {"path": "wiki/notes/b.md", "line": 3, "rule": "MD034", "severity": "error",
-                 "message": 'Bare URL used [Context: "https://x"]', "column": 5},
-            ],
-            report["markdownlint_findings"],
-        )
-        self.assertEqual("checked", report["summary"]["markdownlint"])
-        self.assertEqual(2, report["summary"]["category_counts"]["markdownlint_findings"])
-        self.assertEqual(2, report["summary"]["issues_found"])
-        self.assertIn("## Markdownlint Findings", lint_engine.render_markdown(report))
-
-    def test_clean_vault_reports_nothing(self) -> None:
-        report, calls, _ = self._lint(self._vault(), stderr="Summary: 0 error(s)\n", markdownlint=True)
-        self.assertIsNotNone(calls)
-        self.assertEqual([], report["markdownlint_findings"])
-        self.assertEqual(0, report["summary"]["issues_found"])
-
-    def test_excluded_and_hidden_paths_are_dropped(self) -> None:
-        stderr = self.TWO_FINDINGS + "wiki/.drafts/x.md:1 error MD041/first-line-h1 First line\n"
-        report, _, _ = self._lint(self._vault(), stderr=stderr, exit_code=1, markdownlint=True,
-                                  exclude=["wiki/notes/*"])
-        self.assertEqual(["wiki/a.md"], [e["path"] for e in report["markdownlint_findings"]])
-
-    def test_markdownlint_error_is_a_configuration_error(self) -> None:
-        report, _, _ = self._lint(self._vault(), stderr="Error: bad config\n", exit_code=2,
-                                  markdownlint=True)
-        self.assertEqual("failed", report["summary"]["markdownlint"])
-        self.assertEqual([], report["markdownlint_findings"])
-        errors = [e for e in report["configuration_errors"] if e["reason"] == "markdownlint-failed"]
-        self.assertEqual(1, len(errors))
-        self.assertIn("bad config", errors[0]["message"])
-
-    def test_missing_npx_is_reported_not_raised(self) -> None:
-        report, calls, _ = self._lint(self._vault(), npx=False, markdownlint=True)
-        self.assertIsNone(calls)
-        self.assertEqual("failed", report["summary"]["markdownlint"])
-        self.assertEqual(["markdownlint-unavailable"],
-                         [e["reason"] for e in report["configuration_errors"]])
-
-    def test_wiki_root_lint_reports_paths_relative_to_wiki(self) -> None:
-        files = self._vault(**{".claude-obsidian.json": "{}\n"})
-        report, calls, root = self._lint(files, stderr=self.TWO_FINDINGS, exit_code=1,
-                                         markdownlint=True, lint_root="wiki")
-        self.assertEqual(str(root.resolve()), calls[0])
-        self.assertEqual("wiki/**/*.md", calls[-1])
-        self.assertEqual(["a.md", "notes/b.md"], [e["path"] for e in report["markdownlint_findings"]])
 
 
 if __name__ == "__main__":

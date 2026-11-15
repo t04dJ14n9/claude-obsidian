@@ -263,6 +263,7 @@
         "vault:.obsidian/**",
         "vault:.raw/**",
         "vault:.vault-meta/**",
+        "vault:AGENTS.md",
         "vault:inbox/**",
         "vault:wiki/**"
       ],
@@ -305,6 +306,10 @@
         },
         {
           "pattern": "vault:.vault-meta/tiling-thresholds.json",
+          "access": "transactional"
+        },
+        {
+          "pattern": "vault:AGENTS.md",
           "access": "transactional"
         },
         {

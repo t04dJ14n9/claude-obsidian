@@ -35,6 +35,7 @@ def test_init_and_adopt_are_non_destructive() -> None:
         result = apply_bundle(vault, operation)
         assert ".claude-obsidian.json" in result["changed_paths"]
         assert (vault / "inbox/.gitkeep").is_file()
+        assert "claude-obsidian skills" in (vault / "AGENTS.md").read_text(encoding="utf-8")
         assert ".vault-meta/" in (vault / ".gitignore").read_text(encoding="utf-8")
         assert scan_vault(vault)["workspace_config"]
         assert "created: 2026-07-11" in (vault / "wiki/index.md").read_text()
@@ -42,6 +43,8 @@ def test_init_and_adopt_are_non_destructive() -> None:
 
         custom = vault / ".obsidian/app.json"
         custom.write_text('{"custom": true}\n')
+        own_rules = vault / "AGENTS.md"
+        own_rules.write_text("# My vault rules\n")
         adopt = build_vault_bundle(
             vault,
             operation_id="adopt",
@@ -51,6 +54,18 @@ def test_init_and_adopt_are_non_destructive() -> None:
         )
         assert ".obsidian/app.json" not in [write["path"] for write in adopt["writes"]]
         assert custom.read_text() == '{"custom": true}\n'
+        # A vault's own AGENTS.md is never replaced by the seed, even with force.
+        assert "AGENTS.md" not in [write["path"] for write in adopt["writes"]]
+        forced = build_vault_bundle(
+            vault,
+            operation_id="adopt-force",
+            operation_type="migration",
+            generated_at="2026-07-11T00:00:00Z",
+            adopt=True,
+            force=True,
+        )
+        assert "AGENTS.md" not in [write["path"] for write in forced["writes"]]
+        assert own_rules.read_text() == "# My vault rules\n"
 
 
 def test_init_refuses_existing_content_without_force() -> None:

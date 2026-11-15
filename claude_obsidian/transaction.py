@@ -117,6 +117,7 @@ _DIRECT_MANAGED_METADATA_AUTHORITY = {
 }
 _BOOTSTRAP_COMMON_PATHS = {
     ".claude-obsidian.json",
+    "AGENTS.md",
     ".gitignore",
     ".obsidian/app.json",
     ".obsidian/appearance.json",

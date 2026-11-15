@@ -245,6 +245,14 @@ basenames, orphans, missing frontmatter, empty sections, stale index entries,
 configuration/read errors, and source/claim ledger contract violations. Repairs
 are separate transaction proposals.
 
+## Code repositories
+
+Code never lives inside a vault. Checkouts are managed with `ghq` at
+`<ghq root>/<host>/<owner>/<repo>`, pages about a repository record its remote
+URL, and a `.claude-obsidian.json` at the `ghq` root (or in a host directory)
+selects the vault from inside a checkout. See
+[code-repositories.md](skills/wiki/references/code-repositories.md).
+
 ## Safety and maintenance
 
 - Run `doctor` to verify vault selection.
