@@ -29,7 +29,7 @@
   <a href="https://code.claude.com/docs/en/plugins"><img src="https://img.shields.io/badge/Claude%20Code-plugin-7c3aed" alt="Claude Code plugin" /></a>
   <a href="https://agentskills.io"><img src="https://img.shields.io/badge/Agent%20Skills-compatible-2563eb" alt="Agent Skills compatible" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v3.0.1-d97745" alt="Release v3.0.1" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/release-v3.1.0-d97745" alt="Release v3.1.0" /></a>
   <a href="https://github.com/AgriciDaniel/claude-obsidian/stargazers"><img src="https://img.shields.io/github/stars/AgriciDaniel/claude-obsidian?style=flat" alt="GitHub stars" /></a>
   <a href="https://www.skool.com/ai-marketing-hub-pro"><img src="https://img.shields.io/badge/AI%20Marketing%20Hub-Pro%20community-purple" alt="AI Marketing Hub Pro community" /></a>
 </p>
@@ -68,10 +68,13 @@ The result is a normal Obsidian vault that stays useful with or without an AI: b
 
 <img src="assets/readme/install.svg" width="1200" height="420" alt="Installing claude-obsidian: a terminal adds the marketplace and installs the plugin, an inventory fills with all 15 skills and the 3 agents march in. /claude-obsidian:wiki previews the new vault first and creates it only after you approve. PRESS START." />
 
-You need [Claude Code](https://claude.com/product/claude-code), Python 3.11 or newer and, for the visual side, [Obsidian](https://obsidian.md). Install the plugin with two commands:
+You need [Claude Code](https://claude.com/product/claude-code), Python 3.11 or newer and, for the visual side, [Obsidian](https://obsidian.md). Install the plugin with two commands. This is the fork
+[t04dJ14n9/claude-obsidian](https://github.com/t04dJ14n9/claude-obsidian); its
+additions over [upstream](https://github.com/AgriciDaniel/claude-obsidian) are
+listed in the [changelog](CHANGELOG.md).
 
 ```bash
-claude plugin marketplace add AgriciDaniel/claude-obsidian
+claude plugin marketplace add t04dJ14n9/claude-obsidian
 claude plugin install claude-obsidian@agricidaniel-claude-obsidian
 ```
 
@@ -98,7 +101,7 @@ Already have an Obsidian vault? `/claude-obsidian:wiki` can adopt it without mov
 claude-obsidian is a set of [Agent Skills](https://agentskills.io), so it also runs in other hosts. From a copy of this repo, preview the setup, then apply it:
 
 ```bash
-git clone https://github.com/AgriciDaniel/claude-obsidian.git
+git clone https://github.com/t04dJ14n9/claude-obsidian.git
 cd claude-obsidian
 bash scripts/setup-multi-agent.sh --host codex            # preview, writes nothing
 bash scripts/setup-multi-agent.sh --host codex --apply    # link the skills

@@ -98,6 +98,37 @@ def test_plugin_tree_without_vault_sentinels_is_still_rejected_implicitly() -> N
                 raise AssertionError("sentinel-free plugin discovery must fail closed")
 
 
+def test_workspace_config_above_plugin_tree_is_rejected_implicitly() -> None:
+    # A ghq-style root holds a workspace config that names the user's vault,
+    # and the product checkout lives below it.
+    with tempfile.TemporaryDirectory() as td:
+        base = Path(td)
+        vault = make_vault(base / "vault")
+        root = base / "ghq"
+        plugin = root / "github.com" / "owner" / "claude-obsidian"
+        child = plugin / "scripts"
+        child.mkdir(parents=True)
+        (root / ".claude-obsidian.json").write_text(
+            json.dumps({"schema": "claude-obsidian.workspace.v1", "vault": str(vault)}),
+            encoding="utf-8",
+        )
+        for start, expected in (
+            (plugin, "PLUGIN_ROOT_IS_NOT_VAULT"),
+            (child, "PLUGIN_TREE_IS_NOT_VAULT"),
+        ):
+            try:
+                resolve_vault_root(start=start, environ={}, plugin_root=plugin)
+            except VaultSelectionError as exc:
+                assert exc.code == expected, (exc.code, str(exc))
+            else:
+                raise AssertionError("an ancestor workspace config must not bypass the plugin-tree check")
+        sibling = root / "github.com" / "owner" / "other"
+        sibling.mkdir()
+        selected = resolve_vault_root(start=sibling, environ={}, plugin_root=plugin)
+        assert selected.root == vault.resolve()
+        assert selected.source == "workspace-config"
+
+
 def test_plugin_descendants_are_never_mutable_vaults() -> None:
     with tempfile.TemporaryDirectory() as td:
         plugin = Path(td) / "plugin"
@@ -266,6 +297,7 @@ def main() -> None:
     test_precedence_and_config()
     test_plugin_root_rejected_implicitly_and_explicitly()
     test_plugin_tree_without_vault_sentinels_is_still_rejected_implicitly()
+    test_workspace_config_above_plugin_tree_is_rejected_implicitly()
     test_plugin_descendants_are_never_mutable_vaults()
     test_missing_or_ambiguous_selection_fails_closed()
     test_assert_within_resolves_symlink_escape()

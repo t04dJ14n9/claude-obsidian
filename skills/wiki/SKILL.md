@@ -128,6 +128,10 @@ Read only the reference needed for the current request:
 - [dataview.md](references/dataview.md) for an existing optional Dataview setup;
 - [link-style.md](references/link-style.md) before writing links to vault
   files: wikilinks, or Markdown links when Obsidian's `useMarkdownLinks` is on;
+- [code-repositories.md](references/code-repositories.md) when a request
+  involves a code checkout: cloning or locating code, writing a page about a
+  repository, finding a repository's notes, or choosing the vault from inside
+  a checkout;
 - [knowledge-recipes.md](references/knowledge-recipes.md) for cited glossary or
   consolidation work;
 - [coordination.md](references/coordination.md) for external editors or multiple

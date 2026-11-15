@@ -44,14 +44,16 @@ Wikilinks and embeds (`[[Note]]`, `![[image.png]]`, and frontmatter property
 wikilinks) resolve using Obsidian's vault-wide matching (path, basename, alias,
 suffix, and extensionless `.md`/`.canvas`/`.base` lookup). Standard Markdown
 links and embeds (`[Label](/wiki/path.md)`, `![alt](/wiki/assets/image.png)`)
-resolve **strictly by filesystem path with the exact file extension** — from
-the vault root when starting with `/`, or relative to the current note's
-directory — and never fall back to basename, alias, `wiki/`-prefix, suffix,
-or extensionless lookup, so links broken in VS Code, Cursor, or GitHub are
-reported as `dead_links`. Vaults that configure `"markdown_link_style": "vault-root"`
-in `.vault-meta/lint.json` also reject non-root-relative Markdown links (`non-root-relative-link`),
-and `"allow_hidden_links": [".raw/**"]` allows verified Markdown links to existing
-files under `.raw/` instead of reporting `hidden_target_links`.
+resolve the same way unless `.vault-meta/lint.json` sets `"markdown_link_style"`:
+`"path"` resolves them strictly by filesystem path with the exact extension
+(from the vault root when starting with `/`, or relative to the note), so links
+that would break in VS Code, Cursor, or GitHub are reported as `dead_links`;
+`"vault-root"` is as strict and also reports file-relative links as
+`non-root-relative-link`. `"allow_hidden_links": [".raw/**"]` allows verified
+Markdown links to existing files under `.raw/` instead of reporting
+`hidden_target_links`, and `"duplicate_basename_exempt": ["overview"]` stops
+reporting basenames a vault repeats on purpose (for example one `overview.md`
+per project). See the [link style reference](../wiki/references/link-style.md).
 A heading fragment names the heading text, matched as Obsidian does: case and
 punctuation such as `.` `(` `&` `?` `/` are ignored. A Markdown link may
 instead use the GitHub slug (`Note.md#use-postgres`), which jumps on GitHub

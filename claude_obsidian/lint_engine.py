@@ -18,7 +18,8 @@ array, or an object with a ``dangling_links``-style array) or at
 The walk skips every dot-prefixed directory by default, mirroring Obsidian's
 own indexer, so a duplicated or archived page under a hidden folder (a
 ``.raw`` ingest archive, a ``.claude`` agent worktree, Obsidian's own
-``.trash``, and similar) is never a link-resolution candidate. ``exclude`` globs, passed to ``lint_vault`` or set vault-side, scope specific paths out of
+``.trash``, and similar) is never a link-resolution candidate. ``exclude``
+globs, passed to ``lint_vault`` or set vault-side, scope specific paths out of
 every finding category.
 
 Link resolution is gitignore-aware: when a wikilink resolves to multiple
@@ -43,9 +44,7 @@ import json
 import os
 import posixpath
 import re
-import shutil
 import stat
-import subprocess
 import sys
 import urllib.parse
 import unicodedata
@@ -473,6 +472,51 @@ def _normalize_heading(value: str, *, render_inline: bool = True) -> str:
     return " ".join(_HEADING_LINK_STRIPPED_RE.sub(" ", exact).split()) or exact
 
 
+_GITHUB_CODE_SPAN_RE = re.compile(r"(`+)(.+?)\1")
+# Reference-style links and images ([label][id], [label][]) render as the label.
+_GITHUB_REFERENCE_LINK_RE = re.compile(r"!?\[([^\[\]]*)\]\[[^\[\]]*\]")
+_GITHUB_HTML_TAG_RE = re.compile(r"</?[A-Za-z][^<>]*>")
+# GFM underscore emphasis: a delimiter run that opens before a word and a
+# matching run that closes after one. Intraword underscores (snake_case) stay.
+_GITHUB_UNDERSCORE_EMPHASIS_RE = re.compile(r"(?<![^\W_])(_+)(?=\S)(.+?)(?<=\S)\1(?![^\W_])")
+
+
+def _github_heading_text(heading: str) -> str:
+    """Approximate the text GitHub renders for a heading, which its slugger reads.
+
+    Unlike Obsidian heading matching, nothing is percent-decoded and wikilinks
+    and block IDs stay literal, because GitHub does not know them. HTML tags
+    and underscore emphasis are dropped; code spans keep their content.
+    """
+    value = _ATX_CLOSING_RE.sub("", markdown_visible_text(heading))
+    pieces: list[str] = []
+    cursor = 0
+    for match in _GITHUB_CODE_SPAN_RE.finditer(value):
+        pieces.append(_github_inline_text(value[cursor:match.start()]))
+        pieces.append(match.group(2))
+        cursor = match.end()
+    pieces.append(_github_inline_text(value[cursor:]))
+    return "".join(pieces)
+
+
+def _github_inline_text(value: str) -> str:
+    value = _GITHUB_REFERENCE_LINK_RE.sub(r"\1", value)
+    value = _GITHUB_HTML_TAG_RE.sub("", value)
+    previous = None
+    while previous != value:
+        previous = value
+        value = _GITHUB_UNDERSCORE_EMPHASIS_RE.sub(r"\2", value)
+    return html.unescape(value)
+
+
+def _github_slug_keeps(character: str) -> bool:
+    """github-slugger keeps letters, marks, numbers, connectors, hyphens, and spaces."""
+    if character in {"-", " "}:
+        return True
+    category = unicodedata.category(character)
+    return category[0] in {"L", "M", "N"} or category == "Pc"
+
+
 def _github_heading_slugs(headings: list[str]) -> frozenset[str]:
     """Return the anchors GitHub's slugger gives these headings, in order.
 
@@ -482,8 +526,8 @@ def _github_heading_slugs(headings: list[str]) -> frozenset[str]:
     slugs: set[str] = set()
     seen: dict[str, int] = {}
     for heading in headings:
-        base = re.sub(r"[^\w\- ]", "", _heading_visible_text(heading).strip().lower())
-        base = base.replace(" ", "-")
+        text = _github_heading_text(heading).strip().lower()
+        base = "".join(ch for ch in text if _github_slug_keeps(ch)).replace(" ", "-")
         slug = base
         while slug in seen:
             seen[base] += 1
@@ -815,7 +859,8 @@ def _parse_links(page: _Page) -> list[_Link]:
 
 
 def _link_queries(
-    link: _Link, wiki_prefix: str, source_path: str | None = None
+    link: _Link, wiki_prefix: str, source_path: str | None = None,
+    *, strict_markdown_paths: bool = False,
 ) -> tuple[str, list[str]]:
     # Obsidian wikilink targets are literal; only Markdown destinations are
     # percent-encoded URLs.
@@ -826,10 +871,11 @@ def _link_queries(
     source = source_path or link.source
     if not raw:
         return raw, [source]
-    if link.markdown_relative:
-        # Standard Markdown links resolve strictly by path (relative to the
-        # source file's directory, or from the vault root when starting with `/`).
-        # They never fall back to vault/wiki-root, basename, alias, or suffix.
+    if link.markdown_relative and strict_markdown_paths:
+        # In vaults with the vault-root link style, Markdown links resolve
+        # strictly by path (relative to the source file's directory, or from the
+        # vault root when starting with `/`). They never fall back to
+        # vault/wiki-root, basename, alias, or suffix.
         if raw.startswith("/"):
             stripped = raw.lstrip("/")
             if not stripped:
@@ -838,7 +884,7 @@ def _link_queries(
         return raw, [posixpath.normpath(posixpath.join(posixpath.dirname(source), raw))]
     raw = raw.lstrip("/")
     queries: list[str] = []
-    if raw.startswith(("./", "../")):
+    if link.markdown_relative or raw.startswith(("./", "../")):
         queries.append(posixpath.normpath(posixpath.join(posixpath.dirname(source), raw)))
     queries.append(posixpath.normpath(raw))
     if wiki_prefix != "." and not raw.casefold().startswith("wiki/"):
@@ -854,14 +900,16 @@ def _supports_hidden_checks() -> bool:
 
 def _hidden_target_queries(
     link: _Link, wiki_prefix: str, source_path: str | None = None,
-    within: str | None = None,
+    within: str | None = None, *, strict_markdown_paths: bool = False,
 ) -> list[str]:
     """Return queries naming a dot-prefixed directory or leaf file.
 
     ``within`` confines the queries to the page root when its parent is not
     a declared vault.
     """
-    _, queries = _link_queries(link, wiki_prefix, source_path)
+    _, queries = _link_queries(
+        link, wiki_prefix, source_path, strict_markdown_paths=strict_markdown_paths
+    )
     return [query for query in queries if (
         (parts := PurePosixPath(query).parts)
         and not any(part in {"..", "/"} for part in parts)
@@ -872,7 +920,7 @@ def _hidden_target_queries(
 
 def _confined_hidden_target(
     root: Path, link: _Link, wiki_prefix: str, source_path: str | None = None,
-    within: str | None = None,
+    within: str | None = None, *, strict_markdown_paths: bool = False,
 ) -> str | None:
     """Inspect explicit hidden targets without indexing or reading their payloads.
 
@@ -881,9 +929,12 @@ def _confined_hidden_target(
     """
     if not _supports_hidden_checks():
         return None
-    for query in _hidden_target_queries(link, wiki_prefix, source_path, within):
+    strict = link.markdown_relative and strict_markdown_paths
+    for query in _hidden_target_queries(
+        link, wiki_prefix, source_path, within, strict_markdown_paths=strict_markdown_paths
+    ):
         variants = [query]
-        if not link.markdown_relative and not PurePosixPath(query).suffix:
+        if not strict and not PurePosixPath(query).suffix:
             variants.extend(query + suffix for suffix in sorted(_EXTENSIONLESS_WIKILINK_SUFFIXES))
         for variant in variants:
             descriptor = -1
@@ -912,9 +963,12 @@ class _Resolver:
         targets: Sequence[_Target],
         wiki_prefix: str,
         source_paths: Mapping[str, str] | None = None,
+        *,
+        strict_markdown_paths: bool = False,
     ) -> None:
         self.targets = tuple(targets)
         self.wiki_prefix = wiki_prefix
+        self.strict_markdown_paths = strict_markdown_paths
         self.source_paths = dict(source_paths or {})
         self.by_full: dict[str, list[_Target]] = {}
         self.by_without_link_suffix: dict[str, list[_Target]] = {}
@@ -958,16 +1012,17 @@ class _Resolver:
 
     def resolve(self, link: _Link) -> list[_Target]:
         raw, query_options = _link_queries(
-            link, self.wiki_prefix, self.source_paths.get(link.source)
+            link, self.wiki_prefix, self.source_paths.get(link.source),
+            strict_markdown_paths=self.strict_markdown_paths,
         )
 
-        allow_extensionless = not link.markdown_relative
+        strict = link.markdown_relative and self.strict_markdown_paths
         for query in query_options:
-            exact = self._exact(query, allow_extensionless=allow_extensionless)
+            exact = self._exact(query, allow_extensionless=not strict)
             if exact:
                 return exact
 
-        if link.markdown_relative:
+        if strict:
             return []
 
         if "/" not in raw:
@@ -1181,9 +1236,16 @@ def _frontmatter_policy(
     return (next(iter(configured)) if len(configured) == 1 else "presence"), errors
 
 
-def _markdown_link_style(root: Path) -> tuple[str, list[dict[str, str]]]:
-    configured: set[str] = set()
-    errors: list[dict[str, str]] = []
+# How lint resolves standard Markdown links ([label](target)):
+# - "any" (default): like Obsidian, with basename, alias, and suffix fallbacks.
+# - "path": strictly by path, relative to the note or from the vault root.
+# - "vault-root": strictly by path, and file-relative links are reported.
+_MARKDOWN_LINK_STYLES = {"any", "path", "vault-root"}
+
+
+def _lint_config_payloads(root: Path) -> list[tuple[str, dict[str, Any]]]:
+    """Return each readable vault lint JSON object with its vault-relative path."""
+    payloads: list[tuple[str, dict[str, Any]]] = []
     reader = _transaction_reader()
     for filename in _ALLOWLIST_JSON_NAMES:
         relative = f".vault-meta/{filename}"
@@ -1194,11 +1256,20 @@ def _markdown_link_style(root: Path) -> tuple[str, list[dict[str, str]]]:
             payload = strict_json_loads(raw.decode("utf-8"))
         except Exception:
             continue
-        if not isinstance(payload, dict) or "markdown_link_style" not in payload:
+        if isinstance(payload, dict):
+            payloads.append((relative, payload))
+    return payloads
+
+
+def _markdown_link_style(root: Path) -> tuple[str, list[dict[str, str]]]:
+    configured: set[str] = set()
+    errors: list[dict[str, str]] = []
+    for relative, payload in _lint_config_payloads(root):
+        if "markdown_link_style" not in payload:
             continue
         style = payload["markdown_link_style"]
-        if not isinstance(style, str) or style not in {"any", "vault-root"}:
-            errors.append({"path": relative, "message": "markdown_link_style must be 'any' or 'vault-root'"})
+        if not isinstance(style, str) or style not in _MARKDOWN_LINK_STYLES:
+            errors.append({"path": relative, "message": "markdown_link_style must be 'any', 'path', or 'vault-root'"})
         else:
             configured.add(style)
     if len(configured) > 1:
@@ -1210,17 +1281,8 @@ def _allow_hidden_links(root: Path) -> tuple[tuple[str, ...], list[dict[str, str
     """Glob patterns of dot-folder paths (e.g. ``.raw/**``) allowed as Markdown link targets."""
     patterns: list[str] = []
     errors: list[dict[str, str]] = []
-    reader = _transaction_reader()
-    for filename in _ALLOWLIST_JSON_NAMES:
-        relative = f".vault-meta/{filename}"
-        try:
-            raw = reader(root, relative, limit=1024 * 1024)
-            if raw is None:
-                continue
-            payload = strict_json_loads(raw.decode("utf-8"))
-        except Exception:
-            continue
-        if not isinstance(payload, dict) or "allow_hidden_links" not in payload:
+    for relative, payload in _lint_config_payloads(root):
+        if "allow_hidden_links" not in payload:
             continue
         value = payload["allow_hidden_links"]
         if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
@@ -1649,106 +1711,12 @@ def _sanitize_report_value(value: Any) -> Any:
     return value
 
 
-# A vault opts into the markdownlint check with one of these files at its root,
-# or a "markdownlint-cli2" key in package.json.
-_MARKDOWNLINT_CONFIG_FILES = (
-    ".markdownlint-cli2.jsonc", ".markdownlint-cli2.yaml", ".markdownlint-cli2.cjs",
-    ".markdownlint-cli2.mjs", ".markdownlint.jsonc", ".markdownlint.json",
-    ".markdownlint.yaml", ".markdownlint.yml", ".markdownlint.cjs", ".markdownlint.mjs",
-)
-MARKDOWNLINT_TIMEOUT_SECONDS = 300
-# markdownlint-cli2's default output: path:line[:column] severity MD001/alias description [detail]
-_MARKDOWNLINT_LINE_RE = re.compile(
-    r"^(?P<path>.+?):(?P<line>\d+)(?::(?P<column>\d+))? (?P<severity>error|warning) "
-    r"(?P<names>\S+) (?P<message>.*)$"
-)
-
-
-def has_markdownlint_config(vault_root: str | os.PathLike[str]) -> bool:
-    """Return whether the vault root declares a markdownlint configuration."""
-    root = Path(vault_root)
-    if any((root / name).is_file() for name in _MARKDOWNLINT_CONFIG_FILES):
-        return True
-    try:
-        package = json.loads((root / "package.json").read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError):
-        return False
-    return isinstance(package, dict) and "markdownlint-cli2" in package
-
-
-def _markdownlint_findings(
-    vault_root: Path,
-    root_path: Path,
-    page_prefix: str,
-    exclude_patterns: Sequence[str],
-) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Run markdownlint-cli2 on the wiki's pages; return findings and any error running it.
-
-    Runs ``npx markdownlint-cli2@latest`` from the vault root so the vault's
-    config and ignores apply. ``--no-globs`` keeps the scope to the wiki
-    pattern. Paths are reported relative to the lint root, like every other
-    finding.
-    """
-    npx = shutil.which("npx")
-    if npx is None:
-        return [], [{
-            "path": ".",
-            "reason": "markdownlint-unavailable",
-            "message": "the vault has a markdownlint config, but npx is not on PATH; Markdown style was not checked",
-        }]
-    command = [npx, "--yes", "markdownlint-cli2@latest", "--no-globs", f"{page_prefix}/**/*.md"]
-    try:
-        result = subprocess.run(
-            command, cwd=vault_root, stdin=subprocess.DEVNULL, capture_output=True,
-            text=True, encoding="utf-8", errors="replace",
-            timeout=MARKDOWNLINT_TIMEOUT_SECONDS, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return [], [{
-            "path": ".",
-            "reason": "markdownlint-failed",
-            "message": f"npx markdownlint-cli2@latest did not finish: {exc.__class__.__name__}",
-        }]
-    # Exit 1 means findings were reported; anything else but 0 is an error.
-    if result.returncode not in (0, 1):
-        detail = " ".join(result.stderr.split())[-300:]
-        return [], [{
-            "path": ".",
-            "reason": "markdownlint-failed",
-            "message": f"npx markdownlint-cli2@latest exited {result.returncode}: {detail}",
-        }]
-    offset = root_path.relative_to(vault_root).as_posix()
-    findings: list[dict[str, Any]] = []
-    for line in result.stderr.splitlines():
-        match = _MARKDOWNLINT_LINE_RE.match(line.strip())
-        if match is None:
-            continue
-        canonical = match["path"].replace("\\", "/")
-        relative = canonical if offset == "." else canonical.removeprefix(f"{offset}/")
-        if _is_excluded(relative, exclude_patterns) or not all(
-            is_visible_path(part) for part in relative.split("/")
-        ):
-            continue
-        entry: dict[str, Any] = {
-            "path": relative,
-            "line": int(match["line"]),
-            "rule": match["names"].split("/", 1)[0],
-            "severity": match["severity"],
-            "message": match["message"],
-        }
-        if match["column"]:
-            entry["column"] = int(match["column"])
-        findings.append(entry)
-    return findings, []
-
-
 def lint_vault(
     root: str | os.PathLike[str],
     *,
     as_of: date | str | None = None,
     exclude: Sequence[str] | None = None,
     frontmatter_policy: str | None = None,
-    markdownlint: bool = False,
 ) -> dict[str, Any]:
     """Return a deterministic, JSON-serializable lint report.
 
@@ -1774,13 +1742,6 @@ def lint_vault(
     scalar, ISO date and tag-value checks. The default ``presence`` profile
     preserves existing adopted-vault vocabularies. Vault-side lint JSON may
     select the same profile with a ``frontmatter_policy`` property.
-
-    ``markdownlint=True`` also checks Markdown style when the vault root has a
-    markdownlint config: it runs ``npx markdownlint-cli2@latest`` on the
-    wiki's pages and reports each finding under ``markdownlint_findings``.
-    That check may download markdownlint-cli2 from npm and depends on the
-    release npm serves, so it is off by default and the rest of the report
-    stays deterministic.
     """
 
     root_path = Path(root).expanduser()
@@ -1916,7 +1877,11 @@ def lint_vault(
         for target in targets
         if target.page is not None
     }
-    resolver = _Resolver(resolution_targets, canonical_wiki_prefix, source_paths)
+    strict_markdown_paths = selected_link_style in {"path", "vault-root"}
+    resolver = _Resolver(
+        resolution_targets, canonical_wiki_prefix, source_paths,
+        strict_markdown_paths=strict_markdown_paths,
+    )
     gitignore = GitignoreMatcher(vault_root)
     incoming: dict[str, set[str]] = {page.path: set() for page in wiki_pages}
     dead_links: list[dict[str, Any]] = []
@@ -1941,6 +1906,10 @@ def lint_vault(
                 and not link.file_part.strip().startswith("/")
             ):
                 reason = "non-root-relative-link"
+                # The page is still linked; report the link style, not an orphan.
+                resolved = resolver.resolve(link)
+                if len(resolved) == 1 and resolved[0].path in incoming and resolved[0].path != link.source:
+                    incoming[resolved[0].path].add(link.source)
                 if _is_allowlisted(link, patterns):
                     allowlisted.append(
                         {
@@ -1988,13 +1957,17 @@ def lint_vault(
                 source_path = source_paths.get(link.source)
                 hidden_path = _confined_hidden_target(
                     vault_root, link, canonical_wiki_prefix, source_path,
-                    resolution_scope,
+                    resolution_scope, strict_markdown_paths=strict_markdown_paths,
                 )
                 if hidden_path is not None:
                     if link.markdown_relative and _is_excluded(hidden_path, allow_hidden_patterns):
                         if link.fragment is None:
                             continue
-                        if PurePosixPath(hidden_path).suffix.casefold() == ".pdf":
+                        hidden_suffix = PurePosixPath(hidden_path).suffix.casefold()
+                        if hidden_suffix in {".md", ".markdown"}:
+                            # Hidden pages are not indexed, so the heading cannot be checked.
+                            continue
+                        if hidden_suffix == ".pdf":
                             if _valid_pdf_fragment(link.fragment):
                                 pdf_fragments_syntax_checked += 1
                                 continue
@@ -2025,7 +1998,7 @@ def lint_vault(
                 if (not _supports_hidden_checks()
                         and _hidden_target_queries(
                             link, canonical_wiki_prefix, source_path,
-                            resolution_scope,
+                            resolution_scope, strict_markdown_paths=strict_markdown_paths,
                         )):
                     hidden_target_links.append({
                         "source": link.source, "line": link.line, "target": link.target,
@@ -2164,20 +2137,6 @@ def lint_vault(
     invalid_frontmatter.sort(key=_entry_sort_key)
     unsupported_frontmatter_values.sort(key=_entry_sort_key)
 
-    markdownlint_findings: list[dict[str, Any]] = []
-    if not markdownlint:
-        markdownlint_status = "skipped"
-    elif not has_markdownlint_config(vault_root):
-        markdownlint_status = "no-config"
-    else:
-        markdownlint_findings, markdownlint_errors = _markdownlint_findings(
-            vault_root, root_path, canonical_wiki_prefix, exclude_patterns
-        )
-        markdownlint_status = "failed" if markdownlint_errors else "checked"
-        configuration_errors.extend(markdownlint_errors)
-        markdownlint_findings.sort(key=_entry_sort_key)
-        configuration_errors.sort(key=_entry_sort_key)
-
     categories: dict[str, list[dict[str, Any]]] = {
         "dead_links": dead_links,
         "ambiguous_targets": ambiguous_targets,
@@ -2192,7 +2151,6 @@ def lint_vault(
         "hidden_target_links": hidden_target_links,
         "unsupported_fragments": unsupported_fragments,
         "invalid_frontmatter": invalid_frontmatter,
-        "markdownlint_findings": markdownlint_findings,
     }
     category_counts = {name: len(entries) for name, entries in categories.items()}
     issues_found = sum(category_counts.values())
@@ -2222,7 +2180,6 @@ def lint_vault(
             "property_links_scanned": property_links_scanned,
             "pdf_fragments_syntax_checked": pdf_fragments_syntax_checked,
             "unsupported_frontmatter_values": len(unsupported_frontmatter_values),
-            "markdownlint": markdownlint_status,
             "category_counts": category_counts,
         },
         "scope": {
@@ -2385,11 +2342,6 @@ def render_markdown(report: dict[str, Any]) -> str:
             "Configuration Errors",
             "configuration_errors",
             lambda item: f"- {_code(item['path'])}: {item['message']}",
-        ),
-        (
-            "Markdownlint Findings",
-            "markdownlint_findings",
-            lambda item: f"- {_code(item['path'])}:{item['line']} {item['rule']} {item['message']}",
         ),
         (
             "Provenance Errors",

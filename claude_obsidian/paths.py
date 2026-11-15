@@ -413,17 +413,18 @@ def resolve_vault_root(
         candidate = canonical(env["CLAUDE_OBSIDIAN_VAULT"])
         source = "environment"
     else:
+        # Product distributions intentionally exclude contributor vault
+        # sentinels.  Refuse implicit discovery from the product tree before
+        # searching ancestors, including workspace configs above a checkout
+        # (for example a ghq root), so source and packaged checkouts have
+        # identical, actionable behavior.
+        if plugin is not None and not allow_plugin_root:
+            assert_not_plugin_tree(cwd, plugin, source="cwd-discovery")
         configured = _find_workspace_config(cwd)
         if configured is not None:
             _, candidate = configured
             source = "workspace-config"
         else:
-            # Product distributions intentionally exclude contributor vault
-            # sentinels.  Refuse implicit discovery from the product tree
-            # before searching ancestors so source and packaged checkouts have
-            # identical, actionable behavior.
-            if plugin is not None and not allow_plugin_root:
-                assert_not_plugin_tree(cwd, plugin, source="cwd-discovery")
             nearest = _nearest_vault(cwd)
             if nearest is None:
                 raise VaultSelectionError(

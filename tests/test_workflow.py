@@ -989,6 +989,13 @@ class WorkflowTests(unittest.TestCase):
             'wiki/resources/notes/Space Note.md',
             'wiki/resources/mocs/Test MOC.md',
         ))
+        # A directory merely named like `..foo` is inside the vault; `/../x` is not.
+        self.assertTrue(workflow_module._links_to(
+            '- [Dots](/..notes/Dots.md)\n', '..notes/Dots.md', 'wiki/index.md',
+        ))
+        self.assertFalse(workflow_module._links_to(
+            '- [Escape](/../outside/Note.md)\n', '../outside/Note.md', 'wiki/index.md',
+        ))
 
 
 if __name__ == '__main__':

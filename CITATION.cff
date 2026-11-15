@@ -8,8 +8,8 @@ authors:
 repository-code: 'https://github.com/AgriciDaniel/claude-obsidian'
 url: 'https://github.com/AgriciDaniel/claude-obsidian'
 license: MIT
-version: 3.0.1
-date-released: '2026-10-21'
+version: 3.1.0
+date-released: '2026-11-15'
 keywords:
   - obsidian
   - claude-code

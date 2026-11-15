@@ -51,6 +51,10 @@ def scan_vault(root: Path | str) -> dict[str, Any]:
     }
 
 
+# Seed files the vault owner edits; adopting an existing vault never replaces them.
+USER_OWNED_SEED_PATHS = frozenset({"AGENTS.md"})
+
+
 def _template_files(template_root: Path) -> list[Path]:
     if not template_root.is_dir():
         raise VaultOperationError(f"template vault is missing: {template_root}")
@@ -137,7 +141,7 @@ def build_vault_bundle(
         if current_hash == new_hash:
             continue
         if current_hash is not None:
-            if adopt and not force:
+            if adopt and (not force or relative in USER_OWNED_SEED_PATHS):
                 continue
             if not force:
                 raise VaultOperationError(
